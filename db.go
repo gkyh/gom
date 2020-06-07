@@ -13,9 +13,9 @@ import (
 
 var prefix string = "tb_"
 
-type gomDB struct {
+type MDB struct {
 	Db          *sql.DB
-	parent      *gomDB
+	parent      *MDB
 	tx          *sql.Tx
 	query       string
 	inCondition string
@@ -32,19 +32,19 @@ type gomDB struct {
 	Result      sql.Result
 }
 
-func (m *gomDB) SetPrefix(s string) {
+func (m *MDB) SetPrefix(s string) {
 
 	prefix = s
 }
 
-func (m *gomDB) clone() *gomDB {
+func (m *MDB) clone() *MDB {
 
-	db := &gomDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
+	db := &MDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
 	return db
 }
 
 //ad dbMap new month
-func (m *gomDB) Model(class interface{}) *gomDB {
+func (m *MDB) Model(class interface{}) *MDB {
 
 	if m.parent == nil {
 
@@ -60,7 +60,7 @@ func (m *gomDB) Model(class interface{}) *gomDB {
 	}
 
 }
-func (m *gomDB) Table(name string) *gomDB {
+func (m *MDB) Table(name string) *MDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -73,7 +73,7 @@ func (m *gomDB) Table(name string) *gomDB {
 	}
 }
 
-func (m *gomDB) Where(query string, values ...interface{}) *gomDB {
+func (m *MDB) Where(query string, values ...interface{}) *MDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -86,7 +86,7 @@ func (m *gomDB) Where(query string, values ...interface{}) *gomDB {
 	}
 }
 
-func (m *gomDB) TxBegin() *gomDB {
+func (m *MDB) TxBegin() *MDB {
 
 	tx, _ := m.Db.Begin()
 
@@ -100,7 +100,7 @@ func (m *gomDB) TxBegin() *gomDB {
 		return m
 	}
 }
-func (m *gomDB) Tx(tx *sql.Tx) *gomDB {
+func (m *MDB) Tx(tx *sql.Tx) *MDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -113,17 +113,17 @@ func (m *gomDB) Tx(tx *sql.Tx) *gomDB {
 	}
 }
 
-func (m *gomDB) Commit() error {
+func (m *MDB) Commit() error {
 
 	return m.tx.Commit()
 }
 
-func (m *gomDB) Rollback() error {
+func (m *MDB) Rollback() error {
 
 	return m.tx.Rollback()
 }
 
-func (m *gomDB) Map(maps map[string]interface{}) *gomDB {
+func (m *MDB) Map(maps map[string]interface{}) *MDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -152,7 +152,7 @@ func (m *gomDB) Map(maps map[string]interface{}) *gomDB {
 
 }
 
-func (db *gomDB) Maps(maps map[string]interface{}) *gomDB {
+func (db *MDB) Maps(maps map[string]interface{}) *MDB {
 
 	if db.parent == nil {
 		return nil
@@ -187,7 +187,7 @@ func (db *gomDB) Maps(maps map[string]interface{}) *gomDB {
 	return db
 }
 
-func (db *gomDB) Select(args string) *gomDB {
+func (db *MDB) Select(args string) *MDB {
 
 	if db.parent == nil {
 		return nil
@@ -251,11 +251,11 @@ func getTable(class interface{}) string {
 	return prefix + table
 }
 
-func (db *gomDB) Update(field string, values ...interface{}) *gomDB {
+func (db *MDB) Update(field string, values ...interface{}) *MDB {
 
 	if db.parent == nil {
 
-		fmt.Println("doesn't init gomDB")
+		fmt.Println("doesn't init MDB")
 		return nil
 	}
 	s := bytes.Buffer{}
@@ -291,10 +291,10 @@ func (db *gomDB) Update(field string, values ...interface{}) *gomDB {
 
 }
 
-func (db *gomDB) Delete(class interface{}) *gomDB {
+func (db *MDB) Delete(class interface{}) *MDB {
 
 	if db.parent == nil {
-		fmt.Println("doesn't init gomDB")
+		fmt.Println("doesn't init MDB")
 		return nil
 	}
 	if db.table == "" {
@@ -327,9 +327,9 @@ func (db *gomDB) Delete(class interface{}) *gomDB {
 	return db
 }
 
-func (m *gomDB) Insert(i interface{}) *gomDB {
+func (m *MDB) Insert(i interface{}) *MDB {
 
-	var db *gomDB
+	var db *MDB
 	if m.parent == nil {
 
 		db = m.clone()
@@ -370,13 +370,13 @@ func (m *gomDB) Insert(i interface{}) *gomDB {
 	return db
 }
 
-func (db *gomDB) InsertId() int64 {
+func (db *MDB) InsertId() int64 {
 
 	insID, _ := db.Result.LastInsertId()
 	return insID
 }
 
-func (db *gomDB) Field(field string) *gomDB {
+func (db *MDB) Field(field string) *MDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -384,14 +384,14 @@ func (db *gomDB) Field(field string) *gomDB {
 	return db
 }
 
-func (db *gomDB) Sort(key, sort string) *gomDB {
+func (db *MDB) Sort(key, sort string) *MDB {
 	if db.parent == nil {
 		return nil
 	}
 	db.sort = fmt.Sprintf(" ORDER BY %s %s ", key, sort)
 	return db
 }
-func (db *gomDB) Page(cur, count int32) *gomDB {
+func (db *MDB) Page(cur, count int32) *MDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -404,7 +404,7 @@ func (db *gomDB) Page(cur, count int32) *gomDB {
 	return db
 }
 
-func (db *gomDB) Or(query string, values ...interface{}) *gomDB {
+func (db *MDB) Or(query string, values ...interface{}) *MDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -412,7 +412,7 @@ func (db *gomDB) Or(query string, values ...interface{}) *gomDB {
 	return db
 }
 
-func (db *gomDB) IN(key string, value string) *gomDB {
+func (db *MDB) IN(key string, value string) *MDB {
 
 	if db.parent == nil {
 		return nil
@@ -422,7 +422,7 @@ func (db *gomDB) IN(key string, value string) *gomDB {
 	return db
 }
 
-func (db *gomDB) GroupBy(value string) *gomDB {
+func (db *MDB) GroupBy(value string) *MDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -430,7 +430,7 @@ func (db *gomDB) GroupBy(value string) *gomDB {
 	return db
 }
 
-func (db *gomDB) Count(agrs ...interface{}) int32 {
+func (db *MDB) Count(agrs ...interface{}) int32 {
 
 	if db.parent == nil {
 		return 0
@@ -476,7 +476,7 @@ func (db *gomDB) Count(agrs ...interface{}) int32 {
 	return int32(count)
 
 }
-func (db *gomDB) Find(out interface{}) *gomDB {
+func (db *MDB) Find(out interface{}) *MDB {
 
 	if db.parent == nil {
 		return nil
@@ -524,7 +524,7 @@ func (db *gomDB) Find(out interface{}) *gomDB {
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
-func (db *gomDB) QueryField(field string, out interface{}) error {
+func (db *MDB) QueryField(field string, out interface{}) error {
 
 	db_sql := bytes.Buffer{}
 	db_sql.WriteString("SELECT ")
@@ -555,7 +555,7 @@ func (db *gomDB) QueryField(field string, out interface{}) error {
 
 	return rows.Scan(out)
 }
-func (db *gomDB) FindById(out, id interface{}) error {
+func (db *MDB) FindById(out, id interface{}) error {
 
 	if db.parent == nil {
 		return nil
@@ -587,7 +587,7 @@ func (db *gomDB) FindById(out, id interface{}) error {
 	return nil
 	//return db.dbmap.SelectOne(out, sql.String(), id)
 }
-func (db *gomDB) Get(out interface{}) error {
+func (db *MDB) Get(out interface{}) error {
 
 	if db.parent == nil {
 		return nil
@@ -632,7 +632,7 @@ func (db *gomDB) Get(out interface{}) error {
 
 }
 
-func (db *gomDB) buildSql() string {
+func (db *MDB) buildSql() string {
 
 	sql := bytes.Buffer{}
 
@@ -697,7 +697,7 @@ func (db *gomDB) buildSql() string {
 	return sql.String()
 }
 
-func (db *gomDB) createSql() string {
+func (db *MDB) createSql() string {
 
 	sql := bytes.Buffer{}
 	if db.query != "" {
