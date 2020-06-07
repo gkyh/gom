@@ -18,6 +18,8 @@ type gomDB struct {
 	parent      *gomDB
 	tx          *sql.Tx
 	query       string
+	inCondition string
+	params      []interface{}
 	Condition   []map[string]interface{}
 	OrCondition []map[string]interface{}
 	table       string
@@ -27,6 +29,7 @@ type gomDB struct {
 	sort        string
 	group       string
 	Err         error
+	Result      sql.Result
 }
 
 func (m *gomDB) SetPrefix(s string) {
@@ -36,7 +39,7 @@ func (m *gomDB) SetPrefix(s string) {
 
 func (m *gomDB) clone() *gomDB {
 
-	db := &gomDB{Db: m.Db, parent: m, tx: nil, query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
+	db := &gomDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
 	return db
 }
 
@@ -120,6 +123,35 @@ func (m *gomDB) Rollback() error {
 	return m.tx.Rollback()
 }
 
+func (m *gomDB) Map(maps map[string]interface{}) *gomDB {
+
+	if m.parent == nil {
+		db := m.clone()
+		if maps != nil && len(maps) > 0 {
+
+			for k, v := range maps {
+
+				query := k + " = ? "
+				db.Where(query, v)
+			}
+		}
+		return db
+	} else {
+
+		if maps != nil && len(maps) > 0 {
+
+			for k, v := range maps {
+
+				query := k + " = ? "
+				m.Where(query, v)
+
+			}
+		}
+		return m
+	}
+
+}
+
 func (db *gomDB) Maps(maps map[string]interface{}) *gomDB {
 
 	if db.parent == nil {
@@ -131,7 +163,7 @@ func (db *gomDB) Maps(maps map[string]interface{}) *gomDB {
 
 		for k, v := range maps {
 
-			if m_type(v) == "string" && v == "" {
+			if m_type(v) == "string" && v == "" { //忽略空
 
 				continue
 			}
@@ -219,10 +251,12 @@ func getTable(class interface{}) string {
 	return prefix + table
 }
 
-func (db *gomDB) Update(field string, values ...interface{}) error {
+func (db *gomDB) Update(field string, values ...interface{}) *gomDB {
 
 	if db.parent == nil {
-		return errors.New("doesn't init gomDB")
+
+		fmt.Println("doesn't init gomDB")
+		return nil
 	}
 	s := bytes.Buffer{}
 
@@ -231,28 +265,37 @@ func (db *gomDB) Update(field string, values ...interface{}) error {
 	s.WriteString(" set ")
 	s.WriteString(field)
 
-	s.WriteString(db.BuildSql())
+	s.WriteString(db.buildSql())
 
-	var ret sql.Result
+	params := append(values, db.params...)
+
+	fmt.Println(s.String())
+	fmt.Println(params)
+
 	if db.tx == nil {
-		ret, db.Err = db.Db.Exec(s.String(), values...)
+		db.Result, db.Err = db.Db.Exec(s.String(), params...)
 
 	} else {
-		ret, db.Err = db.tx.Exec(s.String(), values...)
+		db.Result, db.Err = db.tx.Exec(s.String(), params...)
 
 	}
 
-	aff_nums, _ := ret.RowsAffected()
-	fmt.Println("RowsAffected num:", aff_nums)
+	aff_nums, err := db.Result.RowsAffected()
+	if err == nil {
+		fmt.Println("RowsAffected num:", aff_nums)
+	} else {
+		fmt.Errorf("RowsAffected error:%v", err)
+	}
 
-	return db.Err
+	return db
 
 }
 
-func (db *gomDB) Delete(class interface{}) error {
+func (db *gomDB) Delete(class interface{}) *gomDB {
 
 	if db.parent == nil {
-		return errors.New("doesn't init gomDB")
+		fmt.Println("doesn't init gomDB")
+		return nil
 	}
 	if db.table == "" {
 		db.table = getTable(class)
@@ -262,20 +305,37 @@ func (db *gomDB) Delete(class interface{}) error {
 	s.WriteString("DELETE  FROM ")
 	s.WriteString(db.table)
 
-	s.WriteString(db.BuildSql())
+	s.WriteString(db.buildSql())
 
+	fmt.Println(s.String())
+	fmt.Println(db.params)
 	if db.tx == nil {
+		db.Result, db.Err = db.Db.Exec(s.String(), db.params...)
 
-		_, db.Err = db.Db.Exec(s.String())
 	} else {
-		_, db.Err = db.tx.Exec(s.String())
+		db.Result, db.Err = db.tx.Exec(s.String(), db.params...)
+
 	}
 
-	return db.Err
+	aff_nums, err := db.Result.RowsAffected()
+	if err == nil {
+		fmt.Println("RowsAffected num:", aff_nums)
+	} else {
+		fmt.Errorf("RowsAffected error:%v", err)
+	}
+
+	return db
 }
 
-func (db *gomDB) Insert(i interface{}) error {
+func (m *gomDB) Insert(i interface{}) *gomDB {
 
+	var db *gomDB
+	if m.parent == nil {
+
+		db = m.clone()
+	} else {
+		db = m
+	}
 	s := bytes.Buffer{}
 
 	s.WriteString("INSERT INTO  ")
@@ -291,19 +351,29 @@ func (db *gomDB) Insert(i interface{}) error {
 	s.WriteString(insertSql(i))
 
 	fmt.Println(s.String())
-	var ret sql.Result
-	var err error
+	//var ret sql.Result
+	//var err error
 	if db.tx == nil {
 
-		ret, err = db.Db.Exec(s.String())
+		db.Result, db.Err = db.Db.Exec(s.String())
 	} else {
-		ret, err = db.tx.Exec(s.String())
+		db.Result, db.Err = db.tx.Exec(s.String())
 	}
 
-	//insID, _ := ret.LastInsertId()
-	fmt.Println(ret)
+	insID, err := db.Result.LastInsertId()
+	if err == nil {
+		fmt.Println(insID)
+	} else {
+		fmt.Errorf("RowsAffected error:%v", err)
+	}
 
-	return err
+	return db
+}
+
+func (db *gomDB) InsertId() int64 {
+
+	insID, _ := db.Result.LastInsertId()
+	return insID
 }
 
 func (db *gomDB) Field(field string) *gomDB {
@@ -343,17 +413,12 @@ func (db *gomDB) Or(query string, values ...interface{}) *gomDB {
 }
 
 func (db *gomDB) IN(key string, value string) *gomDB {
+
 	if db.parent == nil {
 		return nil
 	}
-	in := key + " IN (" + value + ") "
-	if db.query != "" {
+	db.inCondition = key + " IN (" + value + ") "
 
-		db.query = " AND " + in
-	} else {
-
-		db.query = in
-	}
 	return db
 }
 
@@ -365,7 +430,274 @@ func (db *gomDB) GroupBy(value string) *gomDB {
 	return db
 }
 
-func (db *gomDB) BuildSql() string {
+func (db *gomDB) Count(agrs ...interface{}) int32 {
+
+	if db.parent == nil {
+		return 0
+	}
+	if db.table == "" {
+		if len(agrs) == 0 {
+			return 0
+		}
+		db.table = getTable(agrs[0])
+	}
+
+	db_sql := bytes.Buffer{}
+	db_sql.WriteString("SELECT count(")
+	db_sql.WriteString(db.field)
+	db_sql.WriteString(") FROM ")
+	db_sql.WriteString(db.table)
+
+	db_sql.WriteString(db.buildSql())
+
+	if db.group != "" {
+
+		db_sql.WriteString(db.group)
+	}
+
+	fmt.Println(db_sql.String())
+	fmt.Println(db.params)
+
+	var count int64 = 0
+
+	err := db.Db.QueryRow(db_sql.String(), db.params...).Scan(&count)
+	if err != nil {
+
+		if err == sql.ErrNoRows {
+			// there were no rows, but otherwise no error occurred
+			//no found record
+		}
+
+		db.Err = err
+
+		return 0
+	}
+	//count, db.Err = db.dbmap.SelectInt(sql.String())
+	return int32(count)
+
+}
+func (db *gomDB) Find(out interface{}) *gomDB {
+
+	if db.parent == nil {
+		return nil
+	}
+	if db.table == "" {
+
+		db.table = getTable(out)
+	}
+
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(db.table)
+
+	sqlStr.WriteString(db.buildSql())
+
+	if db.group != "" {
+
+		sqlStr.WriteString(db.group)
+	}
+	if db.sort != "" {
+
+		sqlStr.WriteString(db.sort)
+	}
+
+	if db.Limit > 0 {
+
+		ls := fmt.Sprintf(" limit %d,%d", db.Offset, db.Limit)
+		sqlStr.WriteString(ls)
+	}
+
+	fmt.Println(sqlStr.String())
+	fmt.Println(db.params)
+
+	rows, err := db.Db.Query(sqlStr.String(), db.params...)
+	if err != nil {
+
+		db.Err = err
+		return db
+	}
+
+	db.Err = rowsToList(rows, out)
+
+	//_, db.Err = db.dbmap.Select(out, sql.String())
+	return db
+}
+func (db *gomDB) QueryField(field string, out interface{}) error {
+
+	db_sql := bytes.Buffer{}
+	db_sql.WriteString("SELECT ")
+	db_sql.WriteString(field)
+	db_sql.WriteString(" FROM ")
+	db_sql.WriteString(db.table)
+
+	db_sql.WriteString(db.buildSql())
+
+	fmt.Println(db_sql.String())
+	fmt.Println(db.params)
+
+	rows, err := db.Db.Query(db_sql.String(), db.params...)
+	if err != nil {
+
+		//fmt.Errorf("gorp: cannot SELECT into this type: %v", err)
+		return err
+	}
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+
+	defer rows.Close()
+
+	return rows.Scan(out)
+}
+func (db *gomDB) FindById(out, id interface{}) error {
+
+	if db.parent == nil {
+		return nil
+	}
+	if db.table == "" {
+
+		db.table = getTable(out)
+	}
+
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(db.table)
+	sqlStr.WriteString(" WHERE id=?")
+	fmt.Println(sqlStr.String())
+	rows, err := db.Db.Query(sqlStr.String(), id)
+	if err != nil {
+
+		return err
+	}
+
+	maps, err := rowsToMap(rows)
+	if err != nil {
+		return err
+	}
+
+	mapToStruct(maps, out)
+	return nil
+	//return db.dbmap.SelectOne(out, sql.String(), id)
+}
+func (db *gomDB) Get(out interface{}) error {
+
+	if db.parent == nil {
+		return nil
+	}
+	if db.table == "" {
+
+		db.table = getTable(out)
+	}
+
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(db.table)
+
+	sqlStr.WriteString(db.buildSql())
+
+	if db.group != "" {
+
+		sqlStr.WriteString(db.group)
+	}
+
+	sqlStr.WriteString(" limit 1")
+
+	fmt.Println(sqlStr.String())
+	fmt.Println(db.params)
+
+	rows, err := db.Db.Query(sqlStr.String(), db.params...)
+	if err != nil {
+
+		return err
+	}
+
+	maps, err := rowsToMap(rows)
+	if err != nil {
+		return err
+	}
+
+	mapToStruct(maps, out)
+
+	return nil
+
+}
+
+func (db *gomDB) buildSql() string {
+
+	sql := bytes.Buffer{}
+
+	if len(db.Condition) > 0 {
+
+		sql.WriteString(" WHERE ")
+
+		i := 0
+		for _, clause := range db.Condition {
+
+			query := clause["query"].(string)
+			values := clause["args"].([]interface{})
+			if i > 0 {
+				sql.WriteString(" AND ")
+			}
+
+			sql.WriteString(query)
+
+			for _, vv := range values {
+
+				db.params = append(db.params, vv)
+			}
+			i++
+		}
+
+	}
+	if len(db.OrCondition) > 0 {
+
+		sql.WriteString(" OR ")
+
+		i := 0
+
+		for _, clause := range db.OrCondition {
+
+			query := clause["query"].(string)
+			values := clause["args"].([]interface{})
+			if i > 0 {
+				sql.WriteString(" OR ")
+			}
+
+			sql.WriteString(query)
+
+			for _, vv := range values {
+
+				db.params = append(db.params, vv)
+			}
+			i++
+		}
+
+	}
+	if db.inCondition != "" {
+
+		if len(db.Condition) > 0 {
+
+			sql.WriteString(" AND ")
+		} else {
+			sql.WriteString("  ")
+		}
+		sql.WriteString(db.inCondition)
+
+	}
+	return sql.String()
+}
+
+func (db *gomDB) createSql() string {
 
 	sql := bytes.Buffer{}
 	if db.query != "" {
@@ -392,11 +724,12 @@ func (db *gomDB) BuildSql() string {
 
 		sql.WriteString(" OR ")
 
-		sql.WriteString(buildOrCondition(db.Condition))
+		sql.WriteString(buildOrCondition(db.OrCondition))
 
 	}
 	return sql.String()
 }
+
 func buildCondition(w []map[string]interface{}) string {
 
 	buff := bytes.NewBuffer([]byte{})
@@ -466,197 +799,6 @@ func buildSelectQuery(clause map[string]interface{}) (str string) {
 	str = buff.String()
 
 	return
-}
-
-func (db *gomDB) Count(agrs ...interface{}) int32 {
-
-	if db.parent == nil {
-		return 0
-	}
-	if db.table == "" {
-		if len(agrs) == 0 {
-			return 0
-		}
-		db.table = getTable(agrs[0])
-	}
-
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT count(")
-	db_sql.WriteString(db.field)
-	db_sql.WriteString(") FROM ")
-	db_sql.WriteString(db.table)
-
-	db_sql.WriteString(db.BuildSql())
-
-	if db.group != "" {
-
-		db_sql.WriteString(db.group)
-	}
-
-	var count int64 = 0
-
-	err := db.Db.QueryRow(db_sql.String()).Scan(&count)
-	if err != nil {
-
-		if err == sql.ErrNoRows {
-			// there were no rows, but otherwise no error occurred
-			//no found record
-		}
-
-		db.Err = err
-
-		return 0
-	}
-	//count, db.Err = db.dbmap.SelectInt(sql.String())
-
-	return int32(count)
-
-}
-func (db *gomDB) Find(out interface{}) *gomDB {
-
-	if db.parent == nil {
-		return nil
-	}
-	if db.table == "" {
-
-		db.table = getTable(out)
-	}
-
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-
-	sqlStr.WriteString(db.BuildSql())
-
-	if db.group != "" {
-
-		sqlStr.WriteString(db.group)
-	}
-	if db.sort != "" {
-
-		sqlStr.WriteString(db.sort)
-	}
-
-	if db.Limit > 0 {
-
-		ls := fmt.Sprintf(" limit %d,%d", db.Offset, db.Limit)
-		sqlStr.WriteString(ls)
-	}
-
-	rows, err := db.Db.Query(sqlStr.String())
-	if err != nil {
-
-		db.Err = err
-		return db
-	}
-
-	db.Err = rowsToList(rows, out)
-
-	//_, db.Err = db.dbmap.Select(out, sql.String())
-	return db
-}
-func (db *gomDB) QueryField(field string, out interface{}) error {
-
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT ")
-	db_sql.WriteString(field)
-	db_sql.WriteString(" FROM ")
-	db_sql.WriteString(db.table)
-
-	db_sql.WriteString(db.BuildSql())
-
-	rows, err := db.Db.Query(db_sql.String())
-	if err != nil {
-
-		//fmt.Errorf("gorp: cannot SELECT into this type: %v", err)
-		return err
-	}
-
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		return sql.ErrNoRows
-	}
-
-	defer rows.Close()
-
-	return rows.Scan(out)
-}
-func (db *gomDB) FindById(out, id interface{}) error {
-
-	if db.parent == nil {
-		return nil
-	}
-	if db.table == "" {
-
-		db.table = getTable(out)
-	}
-
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-	sqlStr.WriteString(" WHERE id=?")
-
-	rows, err := db.Db.Query(sqlStr.String(), id)
-	if err != nil {
-
-		return err
-	}
-
-	maps, err := rowsToMap(rows)
-	if err != nil {
-		return err
-	}
-
-	mapToStruct(maps, out)
-	return nil
-	//return db.dbmap.SelectOne(out, sql.String(), id)
-}
-func (db *gomDB) Get(out interface{}) error {
-
-	if db.parent == nil {
-		return nil
-	}
-	if db.table == "" {
-
-		db.table = getTable(out)
-	}
-
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-
-	sqlStr.WriteString(db.BuildSql())
-
-	if db.group != "" {
-
-		sqlStr.WriteString(db.group)
-	}
-
-	sqlStr.WriteString(" limit 1")
-
-	rows, err := db.Db.Query(sqlStr.String())
-	if err != nil {
-
-		return err
-	}
-
-	maps, err := rowsToMap(rows)
-	if err != nil {
-		return err
-	}
-
-	mapToStruct(maps, out)
-
-	return nil
-
 }
 
 func insertSql(i interface{}) string {
