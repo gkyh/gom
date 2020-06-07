@@ -18,7 +18,7 @@ import (
 	db.Ping()  
   
   //init 
-  mdb := &gomDB{Db: db}  
+  mdb := &MDB{Db: db}  
   
   type Person struct { 
 	  Id       int32  `db:"id" key:"auto"`  
@@ -36,30 +36,30 @@ import (
   var a Person  
 	var arr []Person  
 
-#####根据主键查询  
+根据主键查询  
 	db.FindById(&a, 241)  
   //select * from tb_person where id = 241
-#####Where  
+Where  
   db.Where("userid=? and phone=?", 10001, "13345678900").Get(&a)   
   //select * from  tb_person where userid=10001 and phone="13345678900" 
-#####Map  
+Map  
  m:= map[string]interface{}{"userid":10001,"phone": "13345678900"}
  db.Map(m).Get(&a)  
  //select * from  tb_person where userid=10001 and phone="13345678900"
  
- #####Find  
+ Find  
    db.Where("status=?", 1).Find(&arr)   
   //select * from  tb_person where statuse= 1
   
   db.Where("status=?", 1).Where("accno <> ?","122222").Find(&arr)  
   
- #####Page  
+Page  
    db.Where("status=?", 1).Page(1,20).Sort("id","desc").Find(&arr)    
    
    //select * from  tb_person where statuse= 1 order by id desc limit 0,20
    //Page(2,20) => limit 20,20
    
-  #####Count  
+Count  
     db.Where("status=?", 1).Count(&arr)  
     db.Model(a).Where("status=?", 1).Count()  
     //select count(*) from  tb_person where statuse= 1  
