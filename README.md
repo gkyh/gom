@@ -6,11 +6,10 @@ golang ORM库，目前仅支持mysql
 
 ```go
 import (  
-	"database/sql"  
-	//"errors"  
+	"database/sql"   
 	"fmt"  
 	_ "github.com/go-sql-driver/mysql"  
-  "github.com/gkyh/gomdb"  
+        "github.com/gkyh/gom"  
 )  
 
   db, _ := sql.Open("mysql", dbusername+":"+dbpassword+"@tcp("+dbhost+")/"+dbname+"?charset=utf8")  
