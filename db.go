@@ -632,6 +632,40 @@ func (db *MDB) Get(out interface{}) error {
 
 }
 
+func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
+
+	if db.parent == nil {
+		return nil
+	}
+	if db.table == "" {
+
+		db.table = getTable(out)
+	}
+
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(db.table)
+
+	sqlStr.WriteString(" WHERE id=? for update")
+	fmt.Println(sqlStr.String())
+	rows, err := db.Db.Query(sqlStr.String(), id)
+
+	if err != nil {
+
+		return err
+	}
+
+	maps, err := rowsToMap(rows)
+	if err != nil {
+		return err
+	}
+
+	mapToStruct(maps, out)
+	return nil
+
+}
 func (db *MDB) buildSql() string {
 
 	sql := bytes.Buffer{}
