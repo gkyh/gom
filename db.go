@@ -524,6 +524,44 @@ func (db *MDB) Find(out interface{}) *MDB {
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
+func (db *MDB) SelectInt(field string) int64 {
+
+	var out int64
+	db_sql := bytes.Buffer{}
+	db_sql.WriteString("SELECT ")
+	db_sql.WriteString(field)
+	db_sql.WriteString(" FROM ")
+	db_sql.WriteString(db.table)
+
+	db_sql.WriteString(db.buildSql())
+
+	db_sql.WriteString(" limit 1")
+
+	fmt.Println(db_sql.String())
+	fmt.Println(db.params)
+
+	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
+	return out
+}
+func (db *MDB) SelectStr(field string) string {
+
+	var out string
+	db_sql := bytes.Buffer{}
+	db_sql.WriteString("SELECT ")
+	db_sql.WriteString(field)
+	db_sql.WriteString(" FROM ")
+	db_sql.WriteString(db.table)
+
+	db_sql.WriteString(db.buildSql())
+
+	db_sql.WriteString(" limit 1")
+
+	fmt.Println(db_sql.String())
+	fmt.Println(db.params)
+
+	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
+	return out
+}
 func (db *MDB) QueryField(field string, out interface{}) error {
 
 	db_sql := bytes.Buffer{}
