@@ -1002,7 +1002,7 @@ func conversionType(value string, ktype string) (reflect.Value, error) {
 	} else if ktype == "int8" {
 
 		buf, err := strconv.ParseInt(value, 10, 64)
-		return reflect.ValueOf(buf), err
+		return reflect.ValueOf(int8(buf)), err
 	} else if ktype == "int" {
 
 		buf, err := strconv.Atoi(value)
