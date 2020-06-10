@@ -130,7 +130,9 @@ func (m *MDB) Map(maps map[string]interface{}) *MDB {
 		if maps != nil && len(maps) > 0 {
 
 			for k, v := range maps {
-
+				if m_type(v) == "string" && v != "" { //忽略空
+					continue
+				}
 				query := k + " = ? "
 				db.Where(query, v)
 			}
@@ -141,7 +143,9 @@ func (m *MDB) Map(maps map[string]interface{}) *MDB {
 		if maps != nil && len(maps) > 0 {
 
 			for k, v := range maps {
-
+				if m_type(v) == "string" && v != "" { //忽略空
+					continue
+				}
 				query := k + " = ? "
 				m.Where(query, v)
 
