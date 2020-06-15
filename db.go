@@ -562,6 +562,7 @@ func (db *MDB) Find(out interface{}) *MDB {
 		db.Err = err
 		return db
 	}
+	defer rows.Close()
 
 	db.Err = rowsToList(rows, out)
 
@@ -622,6 +623,7 @@ func (db *MDB) QueryField(field string, out interface{}) error {
 		//fmt.Errorf("gorp: cannot SELECT into this type: %v", err)
 		return err
 	}
+	defer rows.Close()
 
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
@@ -684,15 +686,10 @@ func (db *MDB) FindById(out, id interface{}) error {
 
 		return err
 	}
+	defer rows.Close()
 
-	maps, err := rowsToMap(rows)
-	if err != nil {
-		return err
-	}
+	return rowsToStruct(rows, out)
 
-	mapToStruct(maps, out)
-	return nil
-	//return db.dbmap.SelectOne(out, sql.String(), id)
 }
 func (db *MDB) Get(out interface{}) error {
 
@@ -726,15 +723,9 @@ func (db *MDB) Get(out interface{}) error {
 
 		return err
 	}
+	defer rows.Close()
 
-	maps, err := rowsToMap(rows)
-	if err != nil {
-		return err
-	}
-
-	mapToStruct(maps, out)
-
-	return nil
+	return rowsToStruct(rows, out)
 
 }
 
@@ -765,14 +756,9 @@ func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
 
 		return err
 	}
+	defer rows.Close()
 
-	maps, err := rowsToMap(rows)
-	if err != nil {
-		return err
-	}
-
-	mapToStruct(maps, out)
-	return nil
+	return rowsToStruct(rows, out)
 
 }
 
@@ -1364,6 +1350,42 @@ func rowsToList(rows *sql.Rows, in interface{}) error {
 		v.SetLen(index)
 	}
 	return nil
+}
+func rowsToStruct(rows *sql.Rows, out interface{}) error {
+
+	column, err := rows.Columns() //读出查询出的列字段名
+	if err != nil {
+		//logger.Error(err)
+		return err
+	}
+
+	values := make([][]byte, len(column))     //values是每个列的值，这里获取到byte里
+	scans := make([]interface{}, len(column)) //因为每次查询出来的列是不定长的，用len(column)定住当次查询的长度
+
+	for i := range values {
+
+		scans[i] = &values[i]
+	}
+
+	for rows.Next() {
+
+		if err := rows.Scan(scans...); err != nil {
+			//query.Scan查询出来的不定长值放到scans[i] = &values[i],也就是每行都放在values里
+			return err
+		}
+
+		row := make(map[string]string) //每行数据
+		for k, v := range values {
+			//每行数据是放在values里面，现在把它挪到row里
+			key := column[k]
+			row[key] = string(v)
+		}
+
+		mapToStruct(row, out)
+		return nil
+	}
+
+	return errors.New("empty")
 }
 
 func rowsToMap(rows *sql.Rows) (map[string]string, error) {
