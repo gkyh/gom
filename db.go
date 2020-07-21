@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 type SqlExecutor interface {
@@ -475,17 +476,17 @@ func getType(b interface{}) reflect.Type {
 func (db *MDB) Delete(i ...interface{}) error {
 
 	if len(i) > 0 {
+		/*
+			c := i[0]
+			key := reflect.ValueOf(c).Elem().FieldByName("Id")
 
-		c := i[0]
-		key := reflect.ValueOf(c).Elem().FieldByName("Id")
+			if !key.IsValid() {
 
-		if !key.IsValid() {
-
-			db.trace("doesn't found key")
-			return errors.New("doesn't found key")
-		}
-		db1 := db.clone()
-		return db1.Model(c).Where("id=?", key).delete()
+				db.trace("doesn't found key")
+				return errors.New("doesn't found key")
+			}
+			db1 := db.clone()*/
+		return db.Model(i).delete()
 
 	} else {
 
@@ -998,30 +999,34 @@ func (db *MDB) IsExit() (bool, error) {
 }
 func (db *MDB) FindById(out, id interface{}) error {
 
+	DB := db
 	if db.parent == nil {
-		return nil
+		DB = db.clone()
 	}
-	if db.table == "" {
+	if DB.table == "" {
 
-		db.table = getTable(out)
+		DB.table = getTable(out)
 	}
 
 	sqlStr := bytes.Buffer{}
 	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(DB.field)
 	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
+	sqlStr.WriteString(DB.table)
 	sqlStr.WriteString(" WHERE id=?")
 
-	db.trace(sqlStr.String(), id)
-	rows, err := db.Db.Query(sqlStr.String(), id)
+	DB.trace(sqlStr.String(), id)
+	rows, err := DB.Db.Query(sqlStr.String(), id)
 	if err != nil {
 
 		return err
 	}
 	defer rows.Close()
 
-	return rowsToStruct(rows, out)
+	//return rowsToStruct(rows, out)
+	mp, err := rowsToMap(rows)
+	StructOfMap(out, mp)
+	return err
 
 }
 func (db *MDB) Get(out interface{}) error {
@@ -1058,8 +1063,10 @@ func (db *MDB) Get(out interface{}) error {
 	}
 	defer rows.Close()
 
-	return rowsToStruct(rows, out)
-
+	//return rowsToStruct(rows, out)
+	mp, err := rowsToMap(rows)
+	StructOfMap(out, mp)
+	return err
 }
 
 func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
@@ -1091,7 +1098,10 @@ func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
 	}
 	defer rows.Close()
 
-	return rowsToStruct(rows, out)
+	//return rowsToStruct(rows, out)
+	mp, err := rowsToMap(rows)
+	StructOfMap(out, mp)
+	return err
 
 }
 
@@ -1127,6 +1137,71 @@ func (m *MDB) QueryMaps(query string, args ...interface{}) ([]map[string]string,
 	}
 	defer rows.Close()
 	return rowsToMaps(rows)
+}
+
+type emptyInterface struct {
+	typ  *struct{}
+	word unsafe.Pointer
+}
+
+func StructOfMap(struct_ interface{}, data map[string]string) {
+
+	structInter := (interface{})(struct_)
+
+	t := reflect.TypeOf(structInter).Elem()
+
+	structPtr := (*emptyInterface)(unsafe.Pointer(&structInter)).word
+
+	for i, m := 0, t.NumField(); i < m; i++ {
+
+		obj := t.Field(i)
+
+		col := obj.Tag.Get("db")
+		val := data[col]
+		key := obj.Name
+
+		if obj.Anonymous { // 输出匿名字段结构
+
+			for x, mm := 0, obj.Type.NumField(); x < mm; x++ {
+
+				fld := obj.Type.Field(x)
+				tag := fld.Tag.Get("db")
+				kind := fld.Type.Name()
+
+				val = data[tag]
+
+				field, _ := t.FieldByName(fld.Name)
+				fieldPtr := uintptr(structPtr) + field.Offset
+
+				if kind == "string" {
+					*((*string)(unsafe.Pointer(fieldPtr))) = val
+				} else if kind == "int32" {
+					*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+				} else if kind == "int64" {
+					*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+				}
+			}
+		} else {
+
+			field, _ := t.FieldByName(key)
+			fieldPtr := uintptr(structPtr) + field.Offset
+
+			kind := obj.Type.Name()
+
+			if kind == "string" {
+				*((*string)(unsafe.Pointer(fieldPtr))) = val
+			} else if kind == "int32" {
+				*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+			} else if kind == "int64" {
+				*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+			} else if kind == "float64" {
+				*((*float64)(unsafe.Pointer(fieldPtr))) = Float64(val)
+			} else {
+				*((*string)(unsafe.Pointer(fieldPtr))) = val
+			}
+		}
+	}
+
 }
 
 func argsToStr(args ...interface{}) string {
@@ -1447,15 +1522,13 @@ func structToMap(i interface{}) map[string]interface{} {
 		tag := key.Tag.Get("db")
 		mk := key.Tag.Get("key")
 
-		obj := vt.Field(i)
-
 		value := vv.Field(i).Interface()
 
-		if obj.Anonymous { // 输出匿名字段结构
+		if key.Anonymous { // 输出匿名字段结构
 
-			for x, mm := 0, obj.Type.NumField(); x < mm; x++ {
+			for x, mm := 0, key.Type.NumField(); x < mm; x++ {
 
-				field := obj.Type.Field(x)
+				field := key.Type.Field(x)
 
 				tag := field.Tag.Get("db")
 
@@ -1842,4 +1915,23 @@ func rowsToMaps(rows *sql.Rows) ([]map[string]string, error) {
 	}
 
 	return results, nil
+}
+
+func Int(f string) int {
+	v, _ := strconv.ParseInt(f, 10, 0)
+	return int(v)
+}
+func Int32(f string) int32 {
+	v, _ := strconv.ParseInt(f, 10, 64)
+	return int32(v)
+}
+
+func Int64(f string) int64 {
+	v, _ := strconv.ParseInt(f, 10, 64)
+	return int64(v)
+}
+
+func Float64(f string) float64 {
+	v, _ := strconv.ParseFloat(f, 64)
+	return float64(v)
 }
