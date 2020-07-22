@@ -272,8 +272,8 @@ func (db *MDB) Select(args string) *MDB {
 
 func getName(class interface{}) string {
 
-	t := reflect.TypeOf(class)
-	str := fmt.Sprintf("%v", t)
+	str := reflect.TypeOf(class).String()
+	//str := fmt.Sprintf("%v", t)
 
 	buff := bytes.NewBuffer([]byte{})
 
@@ -309,8 +309,8 @@ func m_type(i interface{}) string {
 func getTable(class interface{}) string {
 
 	var table string
-	ts := reflect.TypeOf(class)
-	se := fmt.Sprintf("%v", ts)
+	se := reflect.TypeOf(class).String()
+	//se := fmt.Sprintf("%v", ts)
 
 	idx := strings.LastIndex(se, ".")
 	if idx > 0 {
