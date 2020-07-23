@@ -17,23 +17,26 @@ type SqlExecutor interface {
 	Model(class interface{}) *MDB
 	Table(name string) *MDB
 	Where(query string, values ...interface{}) *MDB
-	Map(maps map[string]interface{}) *MDB
+	Maps(maps map[string]interface{}) *MDB
 	Or(query string, values ...interface{}) *MDB
 	IN(key string, value string) *MDB
 	GroupBy(value string) *MDB
 	Count(agrs ...interface{}) int64
+	PageSize(size int32) int32
 	Find(out interface{}) *MDB
 
 	Select(args string) *MDB
 	Sort(key, sort string) *MDB
 	Page(cur, count int32) *MDB
 
+	Flush(c interface{}) error
 	Update(field string, values ...interface{}) error
 	Delete(i ...interface{}) error
 	Insert(i interface{}) error
 	SelectInt(field string) int64
 	SelectStr(field string) string
 	QueryField(field string, out interface{}) error
+	Field(field string) *MDB
 
 	Get(out interface{}) error
 	FindById(out, id interface{}) error
@@ -155,6 +158,11 @@ func (m *MDB) Where(query string, values ...interface{}) *MDB {
 		return m
 	}
 }
+func (m *MDB) Field(field string) *MDB {
+
+	m.field = field
+	return m
+}
 
 func (m *MDB) TxBegin() *MDB {
 
@@ -193,7 +201,7 @@ func (m *MDB) Rollback() error {
 	return m.tx.Rollback()
 }
 
-func (m *MDB) Map(maps map[string]interface{}) *MDB {
+func (m *MDB) Maps(maps map[string]interface{}) *MDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -309,9 +317,9 @@ func m_type(i interface{}) string {
 func getTable(class interface{}) string {
 
 	var table string
-	se := reflect.TypeOf(class).String()
-	//se := fmt.Sprintf("%v", ts)
-
+	ts := reflect.TypeOf(class)
+	se := fmt.Sprintf("%v", ts)
+	fmt.Println(se)
 	idx := strings.LastIndex(se, ".")
 	if idx > 0 {
 
@@ -476,17 +484,18 @@ func getType(b interface{}) reflect.Type {
 func (db *MDB) Delete(i ...interface{}) error {
 
 	if len(i) > 0 {
-		/*
-			c := i[0]
-			key := reflect.ValueOf(c).Elem().FieldByName("Id")
 
-			if !key.IsValid() {
+		c := i[0]
+		key := reflect.ValueOf(c).Elem().FieldByName("Id")
 
-				db.trace("doesn't found key")
-				return errors.New("doesn't found key")
-			}
-			db1 := db.clone()*/
-		return db.Model(i).delete()
+		if !key.IsValid() {
+
+			db.trace("doesn't found key")
+			return errors.New("doesn't found key")
+		}
+		//db1 := db.clone()
+		id := fmt.Sprintf("%d", key)
+		return db.Model(c).Where("id=?", id).delete()
 
 	} else {
 
@@ -525,6 +534,7 @@ func (db *MDB) delete() error {
 
 	if db.Err != nil {
 
+		db.trace("error:%v", db.Err)
 		return db.Err
 	}
 
@@ -726,7 +736,24 @@ func (db *MDB) GroupBy(value string) *MDB {
 	db.group = " group by " + value
 	return db
 }
+func (db *MDB) PageSize(size int32) int32 {
 
+	total := int32(db.Count())
+
+	if total <= 0 {
+
+		return 0
+	}
+	var page int32 = 0
+	if total%size == 0 {
+		page = total / size
+	} else {
+		page = (total + size) / size
+	}
+
+	return page
+
+}
 func (db *MDB) Count(agrs ...interface{}) int64 {
 
 	if db.parent == nil {
@@ -820,7 +847,52 @@ func (db *MDB) Find(out interface{}) *MDB {
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
+func (db *MDB) FindAll(out interface{}) *MDB {
 
+	if db.parent == nil {
+		return nil
+	}
+	if db.table == "" {
+
+		db.table = getTable(out)
+	}
+
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT ")
+	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(" FROM ")
+	sqlStr.WriteString(db.table)
+
+	offset := (db.Offset + 1) * db.Limit
+	s := bytes.Buffer{}
+	s.WriteString(" where id >= ((SELECT id  FROM ")
+	s.WriteString(db.table)
+	s.WriteString(" order by id desc limit 1)-")
+	s.WriteString(strconv.FormatInt(int64(offset), 10))
+	s.WriteString(") ")
+
+	sqlStr.WriteString(s.String())
+
+	sqlStr.WriteString(" order by id desc ")
+
+	sqlStr.WriteString(" limit ")
+	sqlStr.WriteString(strconv.FormatInt(int64(db.Limit), 10))
+
+	db.trace(sqlStr.String(), nil)
+
+	rows, err := db.Db.Query(sqlStr.String())
+	if err != nil {
+
+		db.Err = err
+		return db
+	}
+	defer rows.Close()
+
+	db.Err = rowsToList(rows, out)
+
+	//_, db.Err = db.dbmap.Select(out, sql.String())
+	return db
+}
 func (db *MDB) Query() (map[string]string, error) {
 
 	if db.parent == nil {
@@ -1090,7 +1162,7 @@ func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
 
 	db.trace(sqlStr.String())
 
-	rows, err := db.Db.Query(sqlStr.String(), id)
+	rows, err := db.tx.Query(sqlStr.String(), id)
 
 	if err != nil {
 
@@ -1650,128 +1722,140 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 	if !val.IsValid() {
 		return errors.New("数据类型不正确")
 	}
+	kind := typ.Kind()
+	//fmt.Println("type:", kind)
+	if reflect.Struct == kind {
+		for i := 0; i < val.NumField(); i++ {
 
-	for i := 0; i < val.NumField(); i++ {
+			obj := typ.Field(i)
 
-		obj := typ.Field(i)
+			if obj.Anonymous { // 输出匿名字段结构
 
-		if obj.Anonymous { // 输出匿名字段结构
+				value := val.Field(i)
+				for x := 0; x < obj.Type.NumField(); x++ {
 
-			value := val.Field(i)
-			for x := 0; x < obj.Type.NumField(); x++ {
+					af := obj.Type.Field(x)
 
-				af := obj.Type.Field(x)
+					key := af.Name
+					ktype := af.Type
+					tag := af.Tag.Get("db")
 
-				key := af.Name
-				ktype := af.Type
-				tag := af.Tag.Get("db")
+					meta := m[tag]
 
-				meta := m[tag]
+					vl := reflect.ValueOf(meta)
+					vt := reflect.TypeOf(meta)
 
-				vl := reflect.ValueOf(meta)
-				vt := reflect.TypeOf(meta)
+					if ktype != vt {
+						vl, _ = conversionType(meta, ktype.Name())
+					}
+					value.FieldByName(key).Set(vl)
 
-				if ktype != vt {
-					vl, _ = conversionType(meta, ktype.Name())
 				}
-				value.FieldByName(key).Set(vl)
-
-			}
-		}
-
-		key := obj.Name
-		ktype := obj.Type
-
-		col := obj.Tag.Get("db")
-		if len(col) == 0 {
-			continue
-		}
-		meta, ok := m[col]
-		if !ok {
-			continue
-		}
-
-		vl := reflect.ValueOf(meta)
-		vt := reflect.TypeOf(meta)
-
-		if ktype != vt {
-			vl, _ = conversionType(meta, ktype.Name())
-		}
-
-		val.FieldByName(key).Set(vl)
-		/*
-
-			value := val.Field(i)
-			kind := value.Kind()
-			tag := typ.Field(i).Tag.Get("db")
-			if !value.CanSet() {
-				return errors.New("结构体字段没有读写权限")
 			}
 
-			if len(meta) == 0 {
+			key := obj.Name
+			ktype := obj.Type
+
+			col := obj.Tag.Get("db")
+			if len(col) == 0 {
 				continue
 			}
-			meta, ok := m[tag]
+			meta, ok := m[col]
 			if !ok {
 				continue
 			}
 
-			if kind == reflect.Struct {
+			vl := reflect.ValueOf(meta)
+			vt := reflect.TypeOf(meta)
 
-				fmt.Println(kind)
-
-			} else if kind == reflect.String {
-				value.SetString(meta)
-			} else if kind == reflect.Float32 {
-				f, err := strconv.ParseFloat(meta, 32)
-				if err != nil {
-					return err
-				}
-				value.SetFloat(f)
-			} else if kind == reflect.Float64 {
-				f, err := strconv.ParseFloat(meta, 64)
-				if err != nil {
-					return err
-				}
-				value.SetFloat(f)
-			} else if kind == reflect.Int64 {
-				integer64, err := strconv.ParseInt(meta, 10, 64)
-				if err != nil {
-					return err
-				}
-				value.SetInt(integer64)
-			} else if kind == reflect.Int {
-				integer, err := strconv.Atoi(meta)
-				if err != nil {
-					return err
-				}
-				value.SetInt(int64(integer))
-			} else if kind == reflect.Int32 {
-				integer, err := strconv.ParseInt(meta, 10, 64)
-				if err != nil {
-					return err
-				}
-				value.SetInt(integer)
-			} else if kind == reflect.Bool {
-				b, err := strconv.ParseBool(meta)
-				if err != nil {
-					return err
-				}
-				value.SetBool(b)
-			} else if kind == reflect.Int8 {
-				integer, err := strconv.ParseInt(meta, 10, 64)
-				if err != nil {
-					return err
-				}
-				value.SetInt(integer)
-			} else {
-				fmt.Println(kind)
-				return errors.New("数据库映射存在不识别的数据类型")
+			if ktype != vt {
+				vl, _ = conversionType(meta, ktype.Name())
 			}
-		*/
+
+			val.FieldByName(key).Set(vl)
+
+		}
+	} else { //reflect.Int32, reflect.Int64，reflect.Int, reflect.String
+
+		for _, value := range m {
+			//fmt.Println(key, ":", value)
+			newValue := reflect.ValueOf(value)
+			val.Set(newValue)
+		}
 	}
 	return nil
 }
+
+/*
+
+	value := val.Field(i)
+	kind := value.Kind()
+	tag := typ.Field(i).Tag.Get("db")
+	if !value.CanSet() {
+		return errors.New("结构体字段没有读写权限")
+	}
+
+	if len(meta) == 0 {
+		continue
+	}
+	meta, ok := m[tag]
+	if !ok {
+		continue
+	}
+
+	if kind == reflect.Struct {
+
+		fmt.Println(kind)
+
+	} else if kind == reflect.String {
+		value.SetString(meta)
+	} else if kind == reflect.Float32 {
+		f, err := strconv.ParseFloat(meta, 32)
+		if err != nil {
+			return err
+		}
+		value.SetFloat(f)
+	} else if kind == reflect.Float64 {
+		f, err := strconv.ParseFloat(meta, 64)
+		if err != nil {
+			return err
+		}
+		value.SetFloat(f)
+	} else if kind == reflect.Int64 {
+		integer64, err := strconv.ParseInt(meta, 10, 64)
+		if err != nil {
+			return err
+		}
+		value.SetInt(integer64)
+	} else if kind == reflect.Int {
+		integer, err := strconv.Atoi(meta)
+		if err != nil {
+			return err
+		}
+		value.SetInt(int64(integer))
+	} else if kind == reflect.Int32 {
+		integer, err := strconv.ParseInt(meta, 10, 64)
+		if err != nil {
+			return err
+		}
+		value.SetInt(integer)
+	} else if kind == reflect.Bool {
+		b, err := strconv.ParseBool(meta)
+		if err != nil {
+			return err
+		}
+		value.SetBool(b)
+	} else if kind == reflect.Int8 {
+		integer, err := strconv.ParseInt(meta, 10, 64)
+		if err != nil {
+			return err
+		}
+		value.SetInt(integer)
+	} else {
+		fmt.Println(kind)
+		return errors.New("数据库映射存在不识别的数据类型")
+	}
+*/
 
 func rowsToList(rows *sql.Rows, in interface{}) error {
 
