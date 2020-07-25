@@ -14,20 +14,20 @@ import (
 )
 
 type SqlExecutor interface {
-	Model(class interface{}) *MDB
-	Table(name string) *MDB
-	Where(query string, values ...interface{}) *MDB
-	Maps(maps map[string]interface{}) *MDB
-	Or(query string, values ...interface{}) *MDB
-	IN(key string, value string) *MDB
-	GroupBy(value string) *MDB
+	Model(class interface{}) *ConDB
+	Table(name string) *ConDB
+	Where(query string, values ...interface{}) *ConDB
+	Maps(maps map[string]interface{}) *ConDB
+	Or(query string, values ...interface{}) *ConDB
+	IN(key string, value string) *ConDB
+	GroupBy(value string) *ConDB
 	Count(agrs ...interface{}) int64
 	PageSize(size int32) int32
-	Find(out interface{}) *MDB
+	Find(out interface{}) *ConDB
 
-	Select(args string) *MDB
-	Sort(key, sort string) *MDB
-	Page(cur, count int32) *MDB
+	Select(args string) *ConDB
+	Sort(key, sort string) *ConDB
+	Page(cur, count int32) *ConDB
 
 	Flush(c interface{}) error
 	Update(field string, values ...interface{}) error
@@ -36,18 +36,19 @@ type SqlExecutor interface {
 	SelectInt(field string) int64
 	SelectStr(field string) string
 	QueryField(field string, out interface{}) error
-	Field(field string) *MDB
+	Field(field string) *ConDB
 
 	Get(out interface{}) error
 	FindById(out, id interface{}) error
 	IsExit() (bool, error)
 
-	TxBegin() *MDB
-	Tx(tx *sql.Tx) *MDB
+	TxBegin() *ConDB
+	Tx(tx *sql.Tx) *ConDB
 	Commit() error
 	Rollback() error
-	GetForUpdate(out interface{}, id interface{}) error
+	GetForUpdate(out interface{}) error
 
+	Exec(sql string, args ...interface{}) (sql.Result, error)
 	QueryRow(query string, args ...interface{}) *sql.Row
 	QueryRows(query string, args ...interface{}) (*sql.Rows, error)
 
@@ -58,13 +59,13 @@ type SqlExecutor interface {
 	Query() (map[string]string, error)
 }
 
-var _ SqlExecutor = &MDB{}
+var _ SqlExecutor = &ConDB{}
 
 var prefix string = "tb_"
 
-type MDB struct {
+type ConDB struct {
 	Db          *sql.DB
-	parent      *MDB
+	parent      *ConDB
 	tx          *sql.Tx
 	query       string
 	inCondition string
@@ -88,7 +89,7 @@ type SqlLogger interface {
 	Printf(format string, v ...interface{})
 }
 
-func (m *MDB) TraceOn(prefix string, log SqlLogger) {
+func (m *ConDB) TraceOn(prefix string, log SqlLogger) {
 	logger = log
 	if prefix == "" {
 		logPrefix = prefix
@@ -98,26 +99,26 @@ func (m *MDB) TraceOn(prefix string, log SqlLogger) {
 }
 
 // TraceOff turns off tracing. It is idempotent.
-func (m *MDB) TraceOff() {
+func (m *ConDB) TraceOff() {
 	logger = nil
 	logPrefix = ""
 }
 
-func (m *MDB) trace(query string, args ...interface{}) {
+func (m *ConDB) trace(query string, args ...interface{}) {
 	if logger != nil {
 		var margs = argsToStr(args...)
 		logger.Printf("%s%s [%s]", logPrefix, query, margs)
 	}
 }
 
-func (m *MDB) clone() *MDB {
+func (m *ConDB) clone() *ConDB {
 
-	db := &MDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
+	db := &ConDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
 	return db
 }
 
 //ad dbMap new month
-func (m *MDB) Model(class interface{}) *MDB {
+func (m *ConDB) Model(class interface{}) *ConDB {
 
 	if m.parent == nil {
 
@@ -133,7 +134,7 @@ func (m *MDB) Model(class interface{}) *MDB {
 	}
 
 }
-func (m *MDB) Table(name string) *MDB {
+func (m *ConDB) Table(name string) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -146,7 +147,7 @@ func (m *MDB) Table(name string) *MDB {
 	}
 }
 
-func (m *MDB) Where(query string, values ...interface{}) *MDB {
+func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -158,13 +159,13 @@ func (m *MDB) Where(query string, values ...interface{}) *MDB {
 		return m
 	}
 }
-func (m *MDB) Field(field string) *MDB {
+func (m *ConDB) Field(field string) *ConDB {
 
 	m.field = field
 	return m
 }
 
-func (m *MDB) TxBegin() *MDB {
+func (m *ConDB) TxBegin() *ConDB {
 
 	tx, _ := m.Db.Begin()
 
@@ -178,7 +179,7 @@ func (m *MDB) TxBegin() *MDB {
 		return m
 	}
 }
-func (m *MDB) Tx(tx *sql.Tx) *MDB {
+func (m *ConDB) Tx(tx *sql.Tx) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -191,17 +192,17 @@ func (m *MDB) Tx(tx *sql.Tx) *MDB {
 	}
 }
 
-func (m *MDB) Commit() error {
+func (m *ConDB) Commit() error {
 
 	return m.tx.Commit()
 }
 
-func (m *MDB) Rollback() error {
+func (m *ConDB) Rollback() error {
 
 	return m.tx.Rollback()
 }
 
-func (m *MDB) Maps(maps map[string]interface{}) *MDB {
+func (m *ConDB) Maps(maps map[string]interface{}) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
@@ -234,7 +235,7 @@ func (m *MDB) Maps(maps map[string]interface{}) *MDB {
 
 }
 
-func (db *MDB) maps(maps map[string]interface{}) *MDB {
+func (db *ConDB) maps(maps map[string]interface{}) *ConDB {
 
 	if db.parent == nil {
 		return nil
@@ -269,7 +270,7 @@ func (db *MDB) maps(maps map[string]interface{}) *MDB {
 	return db
 }
 
-func (db *MDB) Select(args string) *MDB {
+func (db *ConDB) Select(args string) *ConDB {
 
 	if db.parent == nil {
 		return nil
@@ -317,9 +318,9 @@ func m_type(i interface{}) string {
 func getTable(class interface{}) string {
 
 	var table string
-	ts := reflect.TypeOf(class)
-	se := fmt.Sprintf("%v", ts)
-	fmt.Println(se)
+	se := reflect.TypeOf(class).String()
+	//se := fmt.Sprintf("%v", ts)
+
 	idx := strings.LastIndex(se, ".")
 	if idx > 0 {
 
@@ -333,9 +334,9 @@ func getTable(class interface{}) string {
 	return prefix + table
 }
 
-func (m *MDB) Flush(c interface{}) error {
+func (m *ConDB) Flush(c interface{}) error {
 
-	var db *MDB
+	var db *ConDB
 	if m.parent == nil {
 
 		db = m.clone()
@@ -392,7 +393,6 @@ func (m *MDB) Flush(c interface{}) error {
 
 	//p := getKey(c, "Id")
 	db.params = append(db.params, id)
-	fmt.Println(db.params...)
 
 	db.trace(s.String(), db.params...)
 
@@ -420,12 +420,12 @@ func (m *MDB) Flush(c interface{}) error {
 
 }
 
-func (db *MDB) Update(field string, values ...interface{}) error {
+func (db *ConDB) Update(field string, values ...interface{}) error {
 
 	if db.parent == nil {
 
-		db.trace("doesn't init MDB")
-		return errors.New("doesn't init MDB")
+		db.trace("doesn't init ConDB")
+		return errors.New("doesn't init ConDB")
 	}
 	s := bytes.Buffer{}
 
@@ -464,6 +464,30 @@ func (db *MDB) Update(field string, values ...interface{}) error {
 
 }
 
+func (m *ConDB) Exec(sql string, params ...interface{}) (sql.Result, error) {
+
+	var db *ConDB
+	if m.parent == nil {
+
+		db = m.clone()
+	} else {
+		db = m
+	}
+
+	db.trace(sql, params...)
+
+	if db.tx == nil {
+		db.Result, db.Err = db.Db.Exec(sql, params...)
+
+	} else {
+		db.Result, db.Err = db.tx.Exec(sql, params...)
+
+	}
+
+	return db.Result, db.Err
+
+}
+
 func getType(b interface{}) reflect.Type {
 
 	cType := reflect.TypeOf(b)
@@ -481,7 +505,7 @@ func getType(b interface{}) reflect.Type {
 	return cType
 
 }
-func (db *MDB) Delete(i ...interface{}) error {
+func (db *ConDB) Delete(i ...interface{}) error {
 
 	if len(i) > 0 {
 
@@ -504,11 +528,11 @@ func (db *MDB) Delete(i ...interface{}) error {
 
 }
 
-func (db *MDB) delete() error {
+func (db *ConDB) delete() error {
 
 	if db.parent == nil {
-		db.trace("doesn't init MDB,need first get new mdb")
-		return errors.New("doesn't init MDB,need first get new mdb")
+		db.trace("doesn't init ConDB,need first get new ConDB")
+		return errors.New("doesn't init ConDB,need first get new ConDB")
 	}
 	if db.table == "" {
 
@@ -563,9 +587,9 @@ func sets(field string) string {
 	return strings.Replace(field, ",", "=?,", -1) + "=?"
 }
 
-func (m *MDB) Save(table, field string, key interface{}, args []interface{}) error {
+func (m *ConDB) Save(table, field string, key interface{}, args []interface{}) error {
 
-	var db *MDB
+	var db *ConDB
 	if m.parent == nil {
 
 		db = m.clone()
@@ -600,9 +624,9 @@ func (m *MDB) Save(table, field string, key interface{}, args []interface{}) err
 
 }
 
-func (m *MDB) Add(table, field string, args []interface{}) error {
+func (m *ConDB) Add(table, field string, args []interface{}) error {
 
-	var db *MDB
+	var db *ConDB
 	if m.parent == nil {
 
 		db = m.clone()
@@ -636,9 +660,9 @@ func (m *MDB) Add(table, field string, args []interface{}) error {
 
 }
 
-func (m *MDB) Insert(i interface{}) error {
+func (m *ConDB) Insert(i interface{}) error {
 
-	var db *MDB
+	var db *ConDB
 	if m.parent == nil {
 
 		db = m.clone()
@@ -678,6 +702,26 @@ func (m *MDB) Insert(i interface{}) error {
 	insID, err := db.Result.LastInsertId()
 	if err == nil {
 		db.trace("RowsAffected num:", insID)
+
+		key := reflect.ValueOf(i).Elem().FieldByName("Id")
+		typ, _ := reflect.TypeOf(i).Elem().FieldByName("Id")
+
+		tp := typ.Type.Name()
+
+		if tp == "int" {
+
+			newValue := reflect.ValueOf(int(insID))
+			key.Set(newValue)
+		} else if tp == "int32" {
+
+			newValue := reflect.ValueOf(int32(insID))
+			key.Set(newValue)
+		} else if tp == "int64" {
+
+			newValue := reflect.ValueOf(insID)
+			key.Set(newValue)
+		}
+
 	} else {
 		db.trace("RowsAffected error:", err)
 	}
@@ -685,20 +729,20 @@ func (m *MDB) Insert(i interface{}) error {
 	return err
 }
 
-func (db *MDB) InsertId() int64 {
+func (db *ConDB) InsertId() int64 {
 
 	insID, _ := db.Result.LastInsertId()
 	return insID
 }
 
-func (db *MDB) Sort(key, sort string) *MDB {
+func (db *ConDB) Sort(key, sort string) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
 	db.sort = fmt.Sprintf(" ORDER BY %s %s ", key, sort)
 	return db
 }
-func (db *MDB) Page(cur, count int32) *MDB {
+func (db *ConDB) Page(cur, count int32) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -711,7 +755,7 @@ func (db *MDB) Page(cur, count int32) *MDB {
 	return db
 }
 
-func (db *MDB) Or(query string, values ...interface{}) *MDB {
+func (db *ConDB) Or(query string, values ...interface{}) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
@@ -719,7 +763,7 @@ func (db *MDB) Or(query string, values ...interface{}) *MDB {
 	return db
 }
 
-func (db *MDB) IN(key string, value string) *MDB {
+func (db *ConDB) IN(key string, value string) *ConDB {
 
 	if db.parent == nil {
 		return nil
@@ -729,14 +773,14 @@ func (db *MDB) IN(key string, value string) *MDB {
 	return db
 }
 
-func (db *MDB) GroupBy(value string) *MDB {
+func (db *ConDB) GroupBy(value string) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
 	db.group = " group by " + value
 	return db
 }
-func (db *MDB) PageSize(size int32) int32 {
+func (db *ConDB) PageSize(size int32) int32 {
 
 	total := int32(db.Count())
 
@@ -754,7 +798,7 @@ func (db *MDB) PageSize(size int32) int32 {
 	return page
 
 }
-func (db *MDB) Count(agrs ...interface{}) int64 {
+func (db *ConDB) Count(agrs ...interface{}) int64 {
 
 	if db.parent == nil {
 		return 0
@@ -799,7 +843,7 @@ func (db *MDB) Count(agrs ...interface{}) int64 {
 	return count
 
 }
-func (db *MDB) Find(out interface{}) *MDB {
+func (db *ConDB) Find(out interface{}) *ConDB {
 
 	if db.parent == nil {
 		return nil
@@ -847,7 +891,7 @@ func (db *MDB) Find(out interface{}) *MDB {
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
-func (db *MDB) FindAll(out interface{}) *MDB {
+func (db *ConDB) FindAll(out interface{}) *ConDB {
 
 	if db.parent == nil {
 		return nil
@@ -893,10 +937,10 @@ func (db *MDB) FindAll(out interface{}) *MDB {
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
-func (db *MDB) Query() (map[string]string, error) {
+func (db *ConDB) Query() (map[string]string, error) {
 
 	if db.parent == nil {
-		return nil, errors.New("not found mdb")
+		return nil, errors.New("not found ConDB")
 	}
 	if db.table == "" {
 
@@ -930,10 +974,10 @@ func (db *MDB) Query() (map[string]string, error) {
 	return rowsToMap(rows)
 
 }
-func (db *MDB) List() ([]map[string]string, error) {
+func (db *ConDB) List() ([]map[string]string, error) {
 
 	if db.parent == nil {
-		return nil, errors.New("not found mdb")
+		return nil, errors.New("not found ConDB")
 	}
 	if db.table == "" {
 
@@ -975,7 +1019,7 @@ func (db *MDB) List() ([]map[string]string, error) {
 	return rowsToMaps(rows)
 }
 
-func (db *MDB) SelectInt(field string) int64 {
+func (db *ConDB) SelectInt(field string) int64 {
 
 	var out int64
 	db_sql := bytes.Buffer{}
@@ -993,7 +1037,7 @@ func (db *MDB) SelectInt(field string) int64 {
 	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
 	return out
 }
-func (db *MDB) SelectStr(field string) string {
+func (db *ConDB) SelectStr(field string) string {
 
 	var out string
 	db_sql := bytes.Buffer{}
@@ -1011,7 +1055,7 @@ func (db *MDB) SelectStr(field string) string {
 	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
 	return out
 }
-func (db *MDB) QueryField(field string, out interface{}) error {
+func (db *ConDB) QueryField(field string, out interface{}) error {
 
 	db_sql := bytes.Buffer{}
 	db_sql.WriteString("SELECT ")
@@ -1043,7 +1087,7 @@ func (db *MDB) QueryField(field string, out interface{}) error {
 	return rows.Scan(out)
 }
 
-func (db *MDB) IsExit() (bool, error) {
+func (db *ConDB) IsExit() (bool, error) {
 
 	if db.parent == nil {
 		return false, errors.New("no found model")
@@ -1069,7 +1113,7 @@ func (db *MDB) IsExit() (bool, error) {
 	return out > 0, db.Err
 
 }
-func (db *MDB) FindById(out, id interface{}) error {
+func (db *ConDB) FindById(out, id interface{}) error {
 
 	DB := db
 	if db.parent == nil {
@@ -1101,7 +1145,7 @@ func (db *MDB) FindById(out, id interface{}) error {
 	return err
 
 }
-func (db *MDB) Get(out interface{}) error {
+func (db *ConDB) Get(out interface{}) error {
 
 	if db.parent == nil {
 		return nil
@@ -1128,20 +1172,30 @@ func (db *MDB) Get(out interface{}) error {
 
 	db.trace(sqlStr.String(), db.params...)
 
-	rows, err := db.Db.Query(sqlStr.String(), db.params...)
-	if err != nil {
+	t := reflect.TypeOf(out)
+	kind := t.Elem().Kind()
 
+	if reflect.Struct == kind {
+
+		rows, err := db.Db.Query(sqlStr.String(), db.params...)
+		if err != nil {
+
+			return err
+		}
+		defer rows.Close()
+
+		//return rowsToStruct(rows, out)
+		mp, err := rowsToMap(rows)
+		StructOfMap(out, mp)
 		return err
 	}
-	defer rows.Close()
 
-	//return rowsToStruct(rows, out)
-	mp, err := rowsToMap(rows)
-	StructOfMap(out, mp)
-	return err
+	db.Err = db.Db.QueryRow(sqlStr.String(), db.params...).Scan(out)
+	return db.Err
+
 }
 
-func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
+func (db *ConDB) GetForUpdate(out interface{}) error {
 
 	if db.parent == nil {
 		return nil
@@ -1157,12 +1211,13 @@ func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
 	sqlStr.WriteString(" FROM ")
 	sqlStr.WriteString(db.table)
 
-	sqlStr.WriteString(" WHERE id=? for update")
-	fmt.Println(sqlStr.String())
+	sqlStr.WriteString(db.buildSql())
+
+	sqlStr.WriteString(" for update")
 
 	db.trace(sqlStr.String())
 
-	rows, err := db.tx.Query(sqlStr.String(), id)
+	rows, err := db.tx.Query(sqlStr.String(), db.params...)
 
 	if err != nil {
 
@@ -1177,17 +1232,17 @@ func (db *MDB) GetForUpdate(out interface{}, id interface{}) error {
 
 }
 
-func (m *MDB) QueryRow(query string, args ...interface{}) *sql.Row {
+func (m *ConDB) QueryRow(query string, args ...interface{}) *sql.Row {
 	m.trace(query, args...)
 	return m.Db.QueryRow(query, args...)
 }
 
-func (m *MDB) QueryRows(query string, args ...interface{}) (*sql.Rows, error) {
+func (m *ConDB) QueryRows(query string, args ...interface{}) (*sql.Rows, error) {
 	m.trace(query, args...)
 	return m.Db.Query(query, args...)
 }
 
-func (m *MDB) QueryMap(query string, args ...interface{}) (map[string]string, error) {
+func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]string, error) {
 
 	m.trace(query, args...)
 	rows, err := m.Db.Query(query, args...)
@@ -1199,7 +1254,7 @@ func (m *MDB) QueryMap(query string, args ...interface{}) (map[string]string, er
 	return rowsToMap(rows)
 }
 
-func (m *MDB) QueryMaps(query string, args ...interface{}) ([]map[string]string, error) {
+func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]string, error) {
 
 	m.trace(query, args...)
 	rows, err := m.Db.Query(query, args...)
@@ -1303,7 +1358,7 @@ func SliceClear(s *[]interface{}) {
 	*s = (*s)[0:0]
 }
 
-func (db *MDB) buildSql() string {
+func (db *ConDB) buildSql() string {
 
 	sql := bytes.Buffer{}
 	SliceClear(&db.params)
@@ -1368,7 +1423,7 @@ func (db *MDB) buildSql() string {
 	return sql.String()
 }
 
-func (db *MDB) createSql() string {
+func (db *ConDB) createSql() string {
 
 	sql := bytes.Buffer{}
 	if db.query != "" {
@@ -1497,6 +1552,9 @@ func insertSql(i interface{}) string {
 
 	for k, v := range data {
 
+		if k == "id" {
+			continue
+		}
 		buff.WriteString(",")
 		buff.WriteString(k)
 
@@ -1861,7 +1919,7 @@ func rowsToList(rows *sql.Rows, in interface{}) error {
 
 	d, err := rowsToMaps(rows)
 	if err != nil {
-		fmt.Println(err)
+		return err
 	}
 
 	length := len(d)
@@ -1925,7 +1983,7 @@ func rowsToStruct(rows *sql.Rows, out interface{}) error {
 		return nil
 	}
 
-	return errors.New("empty")
+	return errors.New("not found rows")
 }
 
 func rowsToMap(rows *sql.Rows) (map[string]string, error) {
@@ -1961,7 +2019,7 @@ func rowsToMap(rows *sql.Rows) (map[string]string, error) {
 		return row, nil
 	}
 
-	return nil, errors.New("empty")
+	return nil, errors.New("not found rows")
 }
 
 func rowsToMaps(rows *sql.Rows) ([]map[string]string, error) {
