@@ -1553,7 +1553,11 @@ func insertSql(i interface{}) string {
 	for k, v := range data {
 
 		if k == "id" {
-			continue
+
+			id := parseString(v)
+			if id == "" || id == "0" {
+				continue
+			}
 		}
 		buff.WriteString(",")
 		buff.WriteString(k)
