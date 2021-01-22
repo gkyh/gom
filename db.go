@@ -1789,7 +1789,7 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 		return errors.New("数据类型不正确")
 	}
 	kind := typ.Kind()
-	//fmt.Println("type:", kind)
+	fmt.Println("type:", kind)
 	if reflect.Struct == kind {
 		for i := 0; i < val.NumField(); i++ {
 
@@ -1841,10 +1841,43 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 			val.FieldByName(key).Set(vl)
 
 		}
+	} else if kind == reflect.Int64 || kind == reflect.Int32 || kind == reflect.Int {
+
+		for _, value := range m {
+
+			integer64, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return err
+			}
+			val.SetInt(integer64)
+		}
+
+	} else if kind == reflect.Float64 {
+
+		for _, value := range m {
+
+			integer64, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return err
+			}
+			val.SetInt(integer64)
+		}
+
+	} else if kind == reflect.Bool {
+
+		for _, value := range m {
+
+			b, err := strconv.ParseBool(value)
+			if err != nil {
+				return err
+			}
+			val.SetBool(b)
+		}
+
 	} else { //reflect.Int32, reflect.Int64，reflect.Int, reflect.String
 
 		for _, value := range m {
-			//fmt.Println(key, ":", value)
+			//fmt.Println(key, "======:", value)
 			newValue := reflect.ValueOf(value)
 			val.Set(newValue)
 		}
