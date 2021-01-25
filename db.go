@@ -1789,7 +1789,7 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 		return errors.New("数据类型不正确")
 	}
 	kind := typ.Kind()
-	fmt.Println("type:", kind)
+	//fmt.Println("type:", kind)
 	if reflect.Struct == kind {
 		for i := 0; i < val.NumField(); i++ {
 
