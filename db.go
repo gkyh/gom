@@ -31,6 +31,7 @@ type SqlExecutor interface {
 
 	Flush(c interface{}) error
 	Update(field string, values ...interface{}) error
+	UpdateMap(maps map[string]interface{}) error
 	Delete(i ...interface{}) error
 	Insert(i interface{}) error
 	SelectInt(field string) int64
@@ -308,6 +309,10 @@ func m_type(i interface{}) string {
 		return "number"
 	case float64:
 		return "number"
+	case uint32:
+		return "number"
+	case uint64:
+		return "number"
 	case []string:
 		return "strings"
 	default:
@@ -419,7 +424,75 @@ func (m *ConDB) Flush(c interface{}) error {
 	return err
 
 }
+func (db *ConDB) UpdateMap(maps map[string]interface{}) error {
 
+	if db.parent == nil {
+
+		db.trace("doesn't init ConDB")
+		return errors.New("doesn't init ConDB")
+	}
+	sql := buildUpdateSQL(maps)
+	s := bytes.Buffer{}
+
+	s.WriteString("UPDATE ")
+	s.WriteString(db.table)
+	s.WriteString(sql)
+	s.WriteString(db.buildSql())
+
+	db.trace(s.String(), db.params...)
+
+	if db.tx == nil {
+		db.Result, db.Err = db.Db.Exec(s.String(), db.params...)
+
+	} else {
+		db.Result, db.Err = db.tx.Exec(s.String(), db.params...)
+
+	}
+
+	if db.Err != nil {
+
+		return db.Err
+	}
+
+	aff_nums, err := db.Result.RowsAffected()
+	if err == nil {
+		db.trace("RowsAffected num:", aff_nums)
+		if aff_nums == 0 {
+
+			return errors.New("RowsAffected rows is 0")
+		}
+	} else {
+		db.trace("RowsAffected error:%v", err)
+	}
+
+	return err
+
+}
+
+
+func buildUpdateSQL(data map[string]interface{}) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var setClauses []string
+
+	for key, value := range data {
+		setClauses = append(setClauses, fmt.Sprintf("%s = %s", key, formatValue(value)))
+	}
+
+	return fmt.Sprintf(" SET %s", strings.Join(setClauses, ", "))
+}
+
+func formatValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")) // 转义单引号
+	case nil:
+		return "NULL"
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
 func (db *ConDB) Update(field string, values ...interface{}) error {
 
 	if db.parent == nil {
@@ -1310,6 +1383,10 @@ func StructOfMap(struct_ interface{}, data map[string]string) {
 					*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
 				} else if kind == "int64" {
 					*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+				} else if kind == "uint32" {
+					*((*uint32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+				} else if kind == "uint64" {
+					*((*uint64)(unsafe.Pointer(fieldPtr))) = Int64(val)
 				}
 			}
 		} else {
@@ -1323,8 +1400,12 @@ func StructOfMap(struct_ interface{}, data map[string]string) {
 				*((*string)(unsafe.Pointer(fieldPtr))) = val
 			} else if kind == "int32" {
 				*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+			}else if kind == "uint32" {
+				*((*uint32)(unsafe.Pointer(fieldPtr))) = Int32(val)
 			} else if kind == "int64" {
 				*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+			} else if kind == "uint64" {
+				*((*uint64)(unsafe.Pointer(fieldPtr))) = Int64(val)
 			} else if kind == "float64" {
 				*((*float64)(unsafe.Pointer(fieldPtr))) = Float64(val)
 			} else {
@@ -1742,11 +1823,11 @@ func conversionType(value string, ktype string) (reflect.Value, error) {
 	if ktype == "string" {
 
 		return reflect.ValueOf(ktype), nil
-	} else if ktype == "int64" {
+	} else if ktype == "int64" || ktype == "uint64"{
 
 		buf, err := strconv.ParseInt(value, 10, 64)
 		return reflect.ValueOf(buf), err
-	} else if ktype == "int32" {
+	} else if ktype == "int32" || ktype == "uint32"{
 
 		buf, err := strconv.ParseInt(value, 10, 64)
 		return reflect.ValueOf(int32(buf)), err
@@ -1841,7 +1922,7 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 			val.FieldByName(key).Set(vl)
 
 		}
-	} else if kind == reflect.Int64 || kind == reflect.Int32 || kind == reflect.Int {
+	} else if kind == reflect.Int64 || kind == reflect.Int32 || kind == reflect.Int || kind == reflect.Uint64 || kind == reflect.Uint32{
 
 		for _, value := range m {
 
