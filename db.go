@@ -1384,9 +1384,9 @@ func StructOfMap(struct_ interface{}, data map[string]string) {
 				} else if kind == "int64" {
 					*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
 				} else if kind == "uint32" {
-					*((*uint32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+					*((*uint32)(unsafe.Pointer(fieldPtr))) = uint32(Int32(val))
 				} else if kind == "uint64" {
-					*((*uint64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+					*((*uint64)(unsafe.Pointer(fieldPtr))) = uint64(Int64(val))
 				}
 			}
 		} else {
@@ -1401,11 +1401,11 @@ func StructOfMap(struct_ interface{}, data map[string]string) {
 			} else if kind == "int32" {
 				*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
 			}else if kind == "uint32" {
-				*((*uint32)(unsafe.Pointer(fieldPtr))) = Int32(val)
+				*((*uint32)(unsafe.Pointer(fieldPtr))) = uint32(Int32(val))
 			} else if kind == "int64" {
 				*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
 			} else if kind == "uint64" {
-				*((*uint64)(unsafe.Pointer(fieldPtr))) = Int64(val)
+				*((*uint64)(unsafe.Pointer(fieldPtr))) = uint64(Int64(val))
 			} else if kind == "float64" {
 				*((*float64)(unsafe.Pointer(fieldPtr))) = Float64(val)
 			} else {
