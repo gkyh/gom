@@ -1886,7 +1886,9 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 					key := af.Name
 					ktype := af.Type
 					tag := af.Tag.Get("db")
-
+					if tag == ""{
+						continue
+					}
 					meta := m[tag]
 
 					vl := reflect.ValueOf(meta)
