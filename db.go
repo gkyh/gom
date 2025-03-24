@@ -16,6 +16,7 @@ import (
 type SqlExecutor interface {
 	Model(class interface{}) *ConDB
 	Table(name string) *ConDB
+	StructModel(class interface{}) *ConDB
 	Where(query string, values ...interface{}) *ConDB
 	Maps(maps map[string]interface{}) *ConDB
 	Or(query string, values ...interface{}) *ConDB
@@ -149,7 +150,7 @@ func (m *ConDB) Table(name string) *ConDB {
 }
 
 // arr 为struct Slice 或 strcut Slice 指针
-func (m *ConDB) StructSliceName(arr interface{}) *ConDB  {
+func (m *ConDB) StructModel(arr interface{}) *ConDB  {
 
 	t := reflect.TypeOf(arr)
 
@@ -163,7 +164,7 @@ func (m *ConDB) StructSliceName(arr interface{}) *ConDB  {
 			elemType := t.Elem()
 			if elemType.Kind() == reflect.Struct {
 				//fmt.Println("Struct Name:", elemType.Name())
-				return Table(prefix + strings.ToLower(elemType.Name()))
+				return m.Table(prefix + strings.ToLower(elemType.Name()))
 			} else {
 				fmt.Println("Not a struct slice")
 			}
@@ -179,8 +180,8 @@ func (m *ConDB) StructSliceName(arr interface{}) *ConDB  {
 		// 获取切片的元素类型
 		structType := elemType.Elem()
 		if structType.Kind() == reflect.Struct {
-			fmt.Println("Struct Name:", structType.Name())
-			return Table(prefix + strings.ToLower(structType.Name()))
+			//fmt.Println("Struct Name:", structType.Name())
+			return m.Table(prefix + strings.ToLower(structType.Name()))
 		} else {
 			fmt.Println("Not a struct slice")
 		}
