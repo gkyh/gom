@@ -148,6 +148,47 @@ func (m *ConDB) Table(name string) *ConDB {
 	}
 }
 
+// arr 为struct Slice 或 strcut Slice 指针
+func (m *ConDB) StructSliceName(arr interface{}) *ConDB  {
+
+	t := reflect.TypeOf(arr)
+
+	// 判断 arr 是否指针
+	if t.Kind() != reflect.Ptr {
+		
+		// 确保 arr 是切片
+		if t.Kind() == reflect.Slice {
+		
+			// 获取切片的元素类型
+			elemType := t.Elem()
+			if elemType.Kind() == reflect.Struct {
+				//fmt.Println("Struct Name:", elemType.Name())
+				return Table(prefix + strings.ToLower(elemType.Name()))
+			} else {
+				fmt.Println("Not a struct slice")
+			}
+		}
+		return m
+
+	}
+
+	// 解除指针，获取实际的切片类型
+	elemType := t.Elem()
+	if elemType.Kind() == reflect.Slice {
+		
+		// 获取切片的元素类型
+		structType := elemType.Elem()
+		if structType.Kind() == reflect.Struct {
+			fmt.Println("Struct Name:", structType.Name())
+			return Table(prefix + strings.ToLower(structType.Name()))
+		} else {
+			fmt.Println("Not a struct slice")
+		}
+	}
+
+	return m
+	
+}
 func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 
 	if m.parent == nil {
