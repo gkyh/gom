@@ -1708,7 +1708,9 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 
 		key := vt.Field(i)
 		tag := key.Tag.Get("db")
-
+		if tag == ""{
+			continue
+		}
 		obj := vt.Field(i)
 		value := vv.Field(i).Interface()
 
@@ -1740,7 +1742,9 @@ func structToMap(i interface{}) map[string]interface{} {
 		key := vt.Field(i)
 		tag := key.Tag.Get("db")
 		mk := key.Tag.Get("key")
-
+		if tag == ""{
+			continue
+		}
 		value := vv.Field(i).Interface()
 
 		if key.Anonymous { // 输出匿名字段结构
