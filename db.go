@@ -499,10 +499,10 @@ func (db *ConDB) UpdateMap(maps map[string]interface{}) error {
 	aff_nums, err := db.Result.RowsAffected()
 	if err == nil {
 		db.trace("RowsAffected num:", aff_nums)
-		if aff_nums == 0 {
+		/*if aff_nums == 0 {
 
 			return errors.New("RowsAffected rows is 0")
-		}
+		}*/
 	} else {
 		db.trace("RowsAffected error:%v", err)
 	}
@@ -571,10 +571,10 @@ func (db *ConDB) Update(field string, values ...interface{}) error {
 	aff_nums, err := db.Result.RowsAffected()
 	if err == nil {
 		db.trace("RowsAffected num:", aff_nums)
-		if aff_nums == 0 {
+		/*if aff_nums == 0 {
 
 			return errors.New("RowsAffected rows is 0")
-		}
+		}*/
 	} else {
 		db.trace("RowsAffected error:%v", err)
 	}
