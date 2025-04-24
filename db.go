@@ -59,6 +59,7 @@ type SqlExecutor interface {
 
 	List() ([]map[string]string, error)
 	Query() (map[string]string, error)
+	Pagination(currentPage, pageSize, totalPage int32) (page int32)
 }
 
 var _ SqlExecutor = &ConDB{}
@@ -1383,6 +1384,50 @@ func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]strin
 	}
 	defer rows.Close()
 	return rowsToMaps(rows)
+}
+
+func (db *ConDB) Pagination(currentPage, pageSize, totalPage int32) (page int32) {
+
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	if currentPage <= 0 {
+
+		currentPage = 1
+	}
+	page = 0
+	if totalPage == 0 || currentPage == 1 {
+
+		total := int32(db.Count())
+		if total <= 0 {
+
+			m.trace("没有查询到记录，获取记录数为0")
+			//panic(`{"code":404, "msg": "没有查询到记录"}`)
+			return
+		}
+
+		page = TotalPage(pageSize, total)
+
+	} else {
+
+		page = totalPage
+	}
+
+	db.Page(currentPage, pageSize)
+	return
+}
+
+func TotalPage(pageSize, total int32) int32 {
+
+	var page int32
+	if total%pageSize == 0 {
+
+		page = total / pageSize
+	} else {
+		page = (total + pageSize) / pageSize
+	}
+	return page
 }
 
 type emptyInterface struct {
