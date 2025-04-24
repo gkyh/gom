@@ -1402,7 +1402,7 @@ func (db *ConDB) Pagination(currentPage, pageSize, totalPage int32) (page int32)
 		total := int32(db.Count())
 		if total <= 0 {
 
-			m.trace("没有查询到记录，获取记录数为0")
+			db.trace("没有查询到记录，获取记录数为0")
 			//panic(`{"code":404, "msg": "没有查询到记录"}`)
 			return
 		}
