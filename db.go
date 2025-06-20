@@ -1734,9 +1734,14 @@ func insertSql(i interface{}) string {
 		buff.WriteString(",")
 		buff.WriteString(k)
 
-		value.WriteString(",'")
-		value.WriteString(parseString(v))
-		value.WriteString("'")
+		if isNumber(v) {
+
+			value.WriteString(fmt.Sprintf(",%v", v))
+		} else {
+
+			value.WriteString(fmt.Sprintf(",'%v'", v))
+
+		}
 
 	}
 
@@ -1747,6 +1752,30 @@ func insertSql(i interface{}) string {
 	return sql
 }
 
+func isNumber(val interface{}) bool {
+	switch val.(type) {
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return true
+	default:
+		return false
+	}
+}
+func FormatToDate(input string) string {
+	t, err := time.Parse("2006-01-02", input)
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
+}
+func FormatToDatetime(input string) string {
+	t, err := time.Parse("2006-01-02 15:04:05", input)
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
 func parseString(value interface{}, args ...int) (s string) {
 	switch v := value.(type) {
 	case bool:
@@ -1795,26 +1824,46 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 
 	for i := 0; i < vt.NumField(); i++ {
 
-		key := vt.Field(i)
-		tag := key.Tag.Get("db")
-		if tag == ""{
-			continue
-		}
 		obj := vt.Field(i)
+		tag := obj.Tag.Get("db")
+
 		value := vv.Field(i).Interface()
 
+		fmt.Println(obj)
+		fmt.Println(value)
 		if obj.Anonymous { // 输出匿名字段结构
-
+			if obj.Name == "Common" {
+				continue
+			}
 			for x := 0; x < obj.Type.NumField(); x++ {
 
 				af := obj.Type.Field(x)
 				tag := af.Tag.Get("db")
-				vv := reflect.ValueOf(value)
-				vl := vv.Field(x).Interface()
+				vl := reflect.ValueOf(value).Field(x).Interface()
 				m[tag] = vl
+
 			}
 		} else {
-			m[tag] = value
+
+			if tag == "" {
+				continue
+			}
+			tagType := obj.Tag.Get("type")
+			if tagType == "date" {
+				vv := FormatToDate(fmt.Sprintf("%v", value))
+				if vv == "" {
+					continue
+				}
+
+			} else if tagType == "datetime" {
+				vv := FormatToDatetime(fmt.Sprintf("%v", value))
+				if vv == "" {
+					continue
+				}
+			} else {
+				m[tag] = value
+			}
+
 		}
 	}
 	return m
