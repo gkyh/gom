@@ -2031,7 +2031,10 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 					ktype := af.Type
 					tag := af.Tag.Get("db")
 					if tag == ""{
-						continue
+						tag = af.Tag.Get("gom")
+						if tag == "" {
+							continue
+						}
 					}
 					meta := m[tag]
 
@@ -2051,7 +2054,11 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 
 			col := obj.Tag.Get("db")
 			if len(col) == 0 {
-				continue
+				col = af.Tag.Get("gom")
+				if col == "" {
+					continue
+				}
+				
 			}
 			meta, ok := m[col]
 			if !ok {
