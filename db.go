@@ -2054,7 +2054,7 @@ func mapReflect(m map[string]string, v reflect.Value) error {
 
 			col := obj.Tag.Get("db")
 			if len(col) == 0 {
-				col = af.Tag.Get("gom")
+				col = obj.Tag.Get("gom")
 				if col == "" {
 					continue
 				}
