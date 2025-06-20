@@ -1828,17 +1828,17 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 		tag := obj.Tag.Get("db")
 
 		value := vv.Field(i).Interface()
-
-		fmt.Println(obj)
-		fmt.Println(value)
 		if obj.Anonymous { // 输出匿名字段结构
 			if obj.Name == "Common" {
 				continue
 			}
 			for x := 0; x < obj.Type.NumField(); x++ {
-
+				
 				af := obj.Type.Field(x)
 				tag := af.Tag.Get("db")
+				if tag == "" {
+					continue
+				}
 				vl := reflect.ValueOf(value).Field(x).Interface()
 				m[tag] = vl
 
