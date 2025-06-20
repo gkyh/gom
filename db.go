@@ -1854,12 +1854,14 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 				if vv == "" {
 					continue
 				}
+				m[tag] = vv
 
 			} else if tagType == "datetime" {
 				vv := FormatToDatetime(fmt.Sprintf("%v", value))
 				if vv == "" {
 					continue
 				}
+				m[tag] = vv
 			} else {
 				m[tag] = value
 			}
