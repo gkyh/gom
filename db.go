@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 )
 
 type SqlExecutor interface {
@@ -54,11 +53,11 @@ type SqlExecutor interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
 	QueryRows(query string, args ...interface{}) (*sql.Rows, error)
 
-	QueryMap(query string, args ...interface{}) (map[string]string, error)
-	QueryMaps(query string, args ...interface{}) ([]map[string]string, error)
+	QueryMap(query string, args ...interface{}) (map[string]interface{}, error)
+	QueryMaps(query string, args ...interface{}) ([]map[string]interface{}, error)
 
-	List() ([]map[string]string, error)
-	Query() (map[string]string, error)
+	List() ([]map[string]interface{}, error)
+	Query() (map[string]interface{}, error)
 	Pagination(currentPage, pageSize, totalPage int32) (page int32)
 }
 
@@ -120,7 +119,7 @@ func (m *ConDB) clone() *ConDB {
 	return db
 }
 
-//ad dbMap new month
+// ad dbMap new month
 func (m *ConDB) Model(class interface{}) *ConDB {
 
 	if m.parent == nil {
@@ -151,16 +150,16 @@ func (m *ConDB) Table(name string) *ConDB {
 }
 
 // arr 为struct Slice 或 strcut Slice 指针
-func (m *ConDB) StructModel(arr interface{}) *ConDB  {
+func (m *ConDB) StructModel(arr interface{}) *ConDB {
 
 	t := reflect.TypeOf(arr)
 
 	// 判断 arr 是否指针
 	if t.Kind() != reflect.Ptr {
-		
+
 		// 确保 arr 是切片
 		if t.Kind() == reflect.Slice {
-		
+
 			// 获取切片的元素类型
 			elemType := t.Elem()
 			if elemType.Kind() == reflect.Struct {
@@ -177,7 +176,7 @@ func (m *ConDB) StructModel(arr interface{}) *ConDB  {
 	// 解除指针，获取实际的切片类型
 	elemType := t.Elem()
 	if elemType.Kind() == reflect.Slice {
-		
+
 		// 获取切片的元素类型
 		structType := elemType.Elem()
 		if structType.Kind() == reflect.Struct {
@@ -189,7 +188,7 @@ func (m *ConDB) StructModel(arr interface{}) *ConDB  {
 	}
 
 	return m
-	
+
 }
 func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 
@@ -279,41 +278,6 @@ func (m *ConDB) Maps(maps map[string]interface{}) *ConDB {
 
 }
 
-func (db *ConDB) maps(maps map[string]interface{}) *ConDB {
-
-	if db.parent == nil {
-		return nil
-	}
-	i := 0
-	s := bytes.Buffer{}
-	if maps != nil && len(maps) > 0 {
-
-		for k, v := range maps {
-
-			if m_type(v) == "string" && v == "" { //忽略空
-
-				continue
-			}
-			if i > 0 {
-
-				s.WriteString(" AND ")
-			}
-			if m_type(v) == "string" {
-
-				s.WriteString(fmt.Sprintf(" %s='%s' ", k, v))
-			} else {
-
-				s.WriteString(fmt.Sprintf(" %s=%v ", k, v))
-			}
-			i++
-		}
-	}
-
-	db.query = s.String()
-
-	return db
-}
-
 func (db *ConDB) Select(args string) *ConDB {
 
 	if db.parent == nil {
@@ -321,23 +285,6 @@ func (db *ConDB) Select(args string) *ConDB {
 	}
 	db.field = args
 	return db
-}
-
-func getName(class interface{}) string {
-
-	str := reflect.TypeOf(class).String()
-	//str := fmt.Sprintf("%v", t)
-
-	buff := bytes.NewBuffer([]byte{})
-
-	for pos, char := range str {
-		if str[pos] != '*' && str[pos] != '[' && str[pos] != ']' {
-
-			buff.WriteRune(char)
-		}
-	}
-
-	return buff.String()
 }
 
 func m_type(i interface{}) string {
@@ -512,7 +459,6 @@ func (db *ConDB) UpdateMap(maps map[string]interface{}) error {
 
 }
 
-
 func buildUpdateSQL(data map[string]interface{}) string {
 	if len(data) == 0 {
 		return ""
@@ -608,23 +554,6 @@ func (m *ConDB) Exec(sql string, params ...interface{}) (sql.Result, error) {
 
 }
 
-func getType(b interface{}) reflect.Type {
-
-	cType := reflect.TypeOf(b)
-
-	if cType.Kind() == reflect.Slice || cType.Kind() == reflect.Ptr {
-		cType = cType.Elem()
-	}
-
-	if cType.Kind() == reflect.Slice || cType.Kind() == reflect.Ptr {
-
-		cType = cType.Elem()
-
-	}
-
-	return cType
-
-}
 func (db *ConDB) Delete(i ...interface{}) error {
 
 	if len(i) > 0 {
@@ -908,7 +837,7 @@ func (db *ConDB) PageSize(size int32) int32 {
 
 		return 0
 	}
-	var page int32 = 0
+	var page int32
 	if total%size == 0 {
 		page = total / size
 	} else {
@@ -949,11 +878,6 @@ func (db *ConDB) Count(agrs ...interface{}) int64 {
 
 	err := db.Db.QueryRow(db_sql.String(), db.params...).Scan(&count)
 	if err != nil {
-
-		if err == sql.ErrNoRows {
-			// there were no rows, but otherwise no error occurred
-			//no found record
-		}
 
 		db.Err = err
 
@@ -1006,7 +930,7 @@ func (db *ConDB) Find(out interface{}) *ConDB {
 	}
 	defer rows.Close()
 
-	db.Err = rowsToList(rows, out)
+	db.Err = RowsToList(rows, out)
 
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
@@ -1052,12 +976,12 @@ func (db *ConDB) FindAll(out interface{}) *ConDB {
 	}
 	defer rows.Close()
 
-	db.Err = rowsToList(rows, out)
+	db.Err = RowsToList(rows, out)
 
 	//_, db.Err = db.dbmap.Select(out, sql.String())
 	return db
 }
-func (db *ConDB) Query() (map[string]string, error) {
+func (db *ConDB) Query() (map[string]interface{}, error) {
 
 	if db.parent == nil {
 		return nil, errors.New("not found ConDB")
@@ -1091,10 +1015,10 @@ func (db *ConDB) Query() (map[string]string, error) {
 	}
 	defer rows.Close()
 
-	return rowsToMap(rows)
+	return RowsToMap(rows)
 
 }
-func (db *ConDB) List() ([]map[string]string, error) {
+func (db *ConDB) List() ([]map[string]interface{}, error) {
 
 	if db.parent == nil {
 		return nil, errors.New("not found ConDB")
@@ -1136,7 +1060,7 @@ func (db *ConDB) List() ([]map[string]string, error) {
 	}
 	defer rows.Close()
 
-	return rowsToMaps(rows)
+	return RowsToMaps(rows)
 }
 
 func (db *ConDB) SelectInt(field string) int64 {
@@ -1259,10 +1183,7 @@ func (db *ConDB) FindById(out, id interface{}) error {
 	}
 	defer rows.Close()
 
-	//return rowsToStruct(rows, out)
-	mp, err := rowsToMap(rows)
-	StructOfMap(out, mp)
-	return err
+	return RowToStruct(rows, out)
 
 }
 func (db *ConDB) Get(out interface{}) error {
@@ -1304,10 +1225,8 @@ func (db *ConDB) Get(out interface{}) error {
 		}
 		defer rows.Close()
 
-		//return rowsToStruct(rows, out)
-		mp, err := rowsToMap(rows)
-		StructOfMap(out, mp)
-		return err
+		return RowToStruct(rows, out)
+
 	}
 
 	db.Err = db.Db.QueryRow(sqlStr.String(), db.params...).Scan(out)
@@ -1345,10 +1264,7 @@ func (db *ConDB) GetForUpdate(out interface{}) error {
 	}
 	defer rows.Close()
 
-	//return rowsToStruct(rows, out)
-	mp, err := rowsToMap(rows)
-	StructOfMap(out, mp)
-	return err
+	return RowToStruct(rows, out)
 
 }
 
@@ -1362,7 +1278,7 @@ func (m *ConDB) QueryRows(query string, args ...interface{}) (*sql.Rows, error) 
 	return m.Db.Query(query, args...)
 }
 
-func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]string, error) {
+func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]interface{}, error) {
 
 	m.trace(query, args...)
 	rows, err := m.Db.Query(query, args...)
@@ -1371,10 +1287,10 @@ func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]string, 
 		return nil, err
 	}
 	defer rows.Close()
-	return rowsToMap(rows)
+	return RowsToMap(rows)
 }
 
-func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]string, error) {
+func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]interface{}, error) {
 
 	m.trace(query, args...)
 	rows, err := m.Db.Query(query, args...)
@@ -1383,7 +1299,7 @@ func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]strin
 		return nil, err
 	}
 	defer rows.Close()
-	return rowsToMaps(rows)
+	return RowsToMaps(rows)
 }
 
 func (db *ConDB) Pagination(currentPage, pageSize, totalPage int32) (page int32) {
@@ -1428,79 +1344,6 @@ func TotalPage(pageSize, total int32) int32 {
 		page = (total + pageSize) / pageSize
 	}
 	return page
-}
-
-type emptyInterface struct {
-	typ  *struct{}
-	word unsafe.Pointer
-}
-
-func StructOfMap(struct_ interface{}, data map[string]string) {
-
-	structInter := (interface{})(struct_)
-
-	t := reflect.TypeOf(structInter).Elem()
-
-	structPtr := (*emptyInterface)(unsafe.Pointer(&structInter)).word
-
-	for i, m := 0, t.NumField(); i < m; i++ {
-
-		obj := t.Field(i)
-
-		col := obj.Tag.Get("db")
-		val := data[col]
-		key := obj.Name
-
-		if obj.Anonymous { // 输出匿名字段结构
-
-			for x, mm := 0, obj.Type.NumField(); x < mm; x++ {
-
-				fld := obj.Type.Field(x)
-				tag := fld.Tag.Get("db")
-				kind := fld.Type.Name()
-
-				val = data[tag]
-
-				field, _ := t.FieldByName(fld.Name)
-				fieldPtr := uintptr(structPtr) + field.Offset
-
-				if kind == "string" {
-					*((*string)(unsafe.Pointer(fieldPtr))) = val
-				} else if kind == "int32" {
-					*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
-				} else if kind == "int64" {
-					*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
-				} else if kind == "uint32" {
-					*((*uint32)(unsafe.Pointer(fieldPtr))) = uint32(Int32(val))
-				} else if kind == "uint64" {
-					*((*uint64)(unsafe.Pointer(fieldPtr))) = uint64(Int64(val))
-				}
-			}
-		} else {
-
-			field, _ := t.FieldByName(key)
-			fieldPtr := uintptr(structPtr) + field.Offset
-
-			kind := obj.Type.Name()
-
-			if kind == "string" {
-				*((*string)(unsafe.Pointer(fieldPtr))) = val
-			} else if kind == "int32" {
-				*((*int32)(unsafe.Pointer(fieldPtr))) = Int32(val)
-			}else if kind == "uint32" {
-				*((*uint32)(unsafe.Pointer(fieldPtr))) = uint32(Int32(val))
-			} else if kind == "int64" {
-				*((*int64)(unsafe.Pointer(fieldPtr))) = Int64(val)
-			} else if kind == "uint64" {
-				*((*uint64)(unsafe.Pointer(fieldPtr))) = uint64(Int64(val))
-			} else if kind == "float64" {
-				*((*float64)(unsafe.Pointer(fieldPtr))) = Float64(val)
-			} else {
-				*((*string)(unsafe.Pointer(fieldPtr))) = val
-			}
-		}
-	}
-
 }
 
 func argsToStr(args ...interface{}) string {
@@ -1595,124 +1438,11 @@ func (db *ConDB) buildSql() string {
 	return sql.String()
 }
 
-func (db *ConDB) createSql() string {
-
-	sql := bytes.Buffer{}
-	if db.query != "" {
-
-		sql.WriteString(" WHERE ")
-		sql.WriteString(db.query)
-
-	}
-
-	if len(db.Condition) > 0 {
-
-		if db.query != "" {
-
-			sql.WriteString(" AND ")
-		} else {
-
-			sql.WriteString(" WHERE ")
-		}
-
-		sql.WriteString(buildCondition(db.Condition))
-
-	}
-	if len(db.OrCondition) > 0 {
-
-		sql.WriteString(" OR ")
-
-		sql.WriteString(buildOrCondition(db.OrCondition))
-
-	}
-	return sql.String()
-}
-
-func buildCondition(w []map[string]interface{}) string {
-
-	buff := bytes.NewBuffer([]byte{})
-	i := 0
-
-	for _, clause := range w {
-		if sql := buildSelectQuery(clause); sql != "" {
-
-			if i > 0 {
-				buff.WriteString(" AND ")
-			}
-			buff.WriteString(sql)
-			i++
-		}
-
-	}
-	return buff.String()
-}
-
-func buildOrCondition(w []map[string]interface{}) string {
-
-	buff := bytes.NewBuffer([]byte{})
-	i := 0
-
-	for _, clause := range w {
-		if sql := buildSelectQuery(clause); sql != "" {
-
-			if i > 0 {
-				buff.WriteString(" Or ")
-			}
-			buff.WriteString(sql)
-			i++
-		}
-
-	}
-	return buff.String()
-}
-
-func buildSelectQuery(clause map[string]interface{}) (str string) {
-	switch value := clause["query"].(type) {
-	case string:
-		str = value
-	case []string:
-		str = strings.Join(value, ", ")
-	}
-
-	args := clause["args"].([]interface{})
-
-	buff := bytes.NewBuffer([]byte{})
-	i := 0
-	for pos, char := range str {
-		if str[pos] == '?' {
-
-			if m_type(args[i]) == "string" {
-				buff.WriteString("'")
-				buff.WriteString(args[i].(string))
-				buff.WriteString("'")
-			} else {
-				buff.WriteString(fmt.Sprintf("%v", args[i]))
-			}
-			i++
-		} else {
-			buff.WriteRune(char)
-		}
-	}
-
-	str = buff.String()
-
-	return
-}
-
 func insertSql(i interface{}) string {
 
 	val := reflect.ValueOf(i)
 	getType := reflect.TypeOf(i)
-	/*
-		for i := 0; i < getType.NumMethod(); i++ {
 
-			m := getType.Method(i)
-			if m.Name == "PreInsert" {
-
-				mv := val.MethodByName("PreInsert")
-				mv.Call(nil)
-			}
-		}*/
 	_, ins := getType.MethodByName("PreInsert")
 	if ins {
 		mv := val.MethodByName("PreInsert")
@@ -1807,7 +1537,7 @@ func parseString(value interface{}, args ...int) (s string) {
 	case string:
 		s = v
 	case time.Time:
-		s = fmt.Sprintf("%s", v.Format("2006-01-02 15:04:05"))
+		s = v.Format("2006-01-02 15:04:05")
 	case []byte:
 		s = string(v)
 	default:
@@ -1833,7 +1563,7 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 				continue
 			}
 			for x := 0; x < obj.Type.NumField(); x++ {
-				
+
 				af := obj.Type.Field(x)
 				tag := af.Tag.Get("db")
 				if tag == "" {
@@ -1869,469 +1599,6 @@ func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
 		}
 	}
 	return m
-}
-
-func structToMap(i interface{}) map[string]interface{} {
-
-	m := make(map[string]interface{})
-	vt := reflect.TypeOf(i).Elem()
-	vv := reflect.ValueOf(i).Elem()
-
-	for i, mn := 0, vt.NumField(); i < mn; i++ {
-
-		key := vt.Field(i)
-		tag := key.Tag.Get("db")
-		mk := key.Tag.Get("key")
-		if tag == ""{
-			continue
-		}
-		value := vv.Field(i).Interface()
-
-		if key.Anonymous { // 输出匿名字段结构
-
-			for x, mm := 0, key.Type.NumField(); x < mm; x++ {
-
-				field := key.Type.Field(x)
-
-				tag := field.Tag.Get("db")
-
-				vv := reflect.ValueOf(value)
-
-				vl := vv.Field(x).Interface()
-
-				m[tag] = vl
-			}
-		} else if mk == "auto" {
-			continue
-		} else {
-
-			//fmt.Printf("%q => %q, ", chKey, vv.FieldByName(key.Name).String())
-			//fmt.Printf("第%d个字段是：%s:%v = %v \n", i+1, key.Name, key.Type, value)
-			m[tag] = value
-		}
-	}
-	return m
-}
-
-func mapToStruct(data map[string]string, c interface{}) {
-
-	pv := reflect.ValueOf(c).Elem()
-	pt := reflect.TypeOf(c).Elem()
-
-	for i, mn := 0, pt.NumField(); i < mn; i++ {
-
-		obj := pt.Field(i)
-
-		key := pt.Field(i).Name
-		ktype := pt.Field(i).Type
-		col := pt.Field(i).Tag.Get("db")
-		value := data[col]
-
-		val := reflect.ValueOf(value)
-		vtype := reflect.TypeOf(value)
-
-		if ktype != vtype {
-
-			val, _ = conversionType(value, ktype.Name())
-		}
-
-		if obj.Anonymous { // 输出匿名字段结构
-
-			for x, max := 0, obj.Type.NumField(); x < max; x++ {
-
-				af := obj.Type.Field(x)
-
-				k := af.Name
-				t := af.Type
-				d := af.Tag.Get("db")
-
-				vl := data[d]
-
-				av := reflect.ValueOf(vl)
-				at := reflect.TypeOf(vl)
-
-				if t != at {
-					av, _ = conversionType(vl, t.Name())
-				}
-				pv.FieldByName(k).Set(av)
-
-			}
-		} else {
-
-			pv.FieldByName(key).Set(val)
-		}
-	}
-}
-func conversionType(value string, ktype string) (reflect.Value, error) {
-
-	if ktype == "string" {
-
-		return reflect.ValueOf(ktype), nil
-	} else if ktype == "int64" || ktype == "uint64"{
-
-		buf, err := strconv.ParseInt(value, 10, 64)
-		return reflect.ValueOf(buf), err
-	} else if ktype == "int32" || ktype == "uint32"{
-
-		buf, err := strconv.ParseInt(value, 10, 64)
-		return reflect.ValueOf(int32(buf)), err
-	} else if ktype == "int8" {
-
-		buf, err := strconv.ParseInt(value, 10, 64)
-		return reflect.ValueOf(int8(buf)), err
-	} else if ktype == "int" {
-
-		buf, err := strconv.Atoi(value)
-		return reflect.ValueOf(buf), err
-	} else if ktype == "float32" {
-
-		buf, err := strconv.ParseFloat(value, 64)
-		return reflect.ValueOf(float32(buf)), err
-	} else if ktype == "float64" {
-
-		buf, err := strconv.ParseFloat(value, 64)
-		return reflect.ValueOf(buf), err
-	} else if ktype == "time.Time" {
-
-		buf, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
-		return reflect.ValueOf(buf), err
-	} else if ktype == "Time" {
-
-		buf, err := time.ParseInLocation("2006-01-02 15:04:05", value, time.Local)
-		return reflect.ValueOf(buf), err
-	} else {
-		return reflect.ValueOf(ktype), nil
-	}
-}
-
-func mapReflect(m map[string]string, v reflect.Value) error {
-
-	t := v.Type()
-	val := v.Elem()
-	typ := t.Elem()
-
-	if !val.IsValid() {
-		return errors.New("数据类型不正确")
-	}
-	kind := typ.Kind()
-	//fmt.Println("type:", kind)
-	if reflect.Struct == kind {
-		for i := 0; i < val.NumField(); i++ {
-
-			obj := typ.Field(i)
-
-			if obj.Anonymous { // 输出匿名字段结构
-
-				value := val.Field(i)
-				for x := 0; x < obj.Type.NumField(); x++ {
-
-					af := obj.Type.Field(x)
-
-					key := af.Name
-					ktype := af.Type
-					tag := af.Tag.Get("db")
-					if tag == ""{
-						tag = af.Tag.Get("gom")
-						if tag == "" {
-							continue
-						}
-					}
-					meta := m[tag]
-
-					vl := reflect.ValueOf(meta)
-					vt := reflect.TypeOf(meta)
-
-					if ktype != vt {
-						vl, _ = conversionType(meta, ktype.Name())
-					}
-					value.FieldByName(key).Set(vl)
-
-				}
-			}
-
-			key := obj.Name
-			ktype := obj.Type
-
-			col := obj.Tag.Get("db")
-			if len(col) == 0 {
-				col = obj.Tag.Get("gom")
-				if col == "" {
-					continue
-				}
-				
-			}
-			meta, ok := m[col]
-			if !ok {
-				continue
-			}
-
-			vl := reflect.ValueOf(meta)
-			vt := reflect.TypeOf(meta)
-
-			if ktype != vt {
-				vl, _ = conversionType(meta, ktype.Name())
-			}
-
-			val.FieldByName(key).Set(vl)
-
-		}
-	} else if kind == reflect.Int64 || kind == reflect.Int32 || kind == reflect.Int || kind == reflect.Uint64 || kind == reflect.Uint32{
-
-		for _, value := range m {
-
-			integer64, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return err
-			}
-			val.SetInt(integer64)
-		}
-
-	} else if kind == reflect.Float64 {
-
-		for _, value := range m {
-
-			integer64, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return err
-			}
-			val.SetInt(integer64)
-		}
-
-	} else if kind == reflect.Bool {
-
-		for _, value := range m {
-
-			b, err := strconv.ParseBool(value)
-			if err != nil {
-				return err
-			}
-			val.SetBool(b)
-		}
-
-	} else { //reflect.Int32, reflect.Int64，reflect.Int, reflect.String
-
-		for _, value := range m {
-			//fmt.Println(key, "======:", value)
-			newValue := reflect.ValueOf(value)
-			val.Set(newValue)
-		}
-	}
-	return nil
-}
-
-/*
-
-	value := val.Field(i)
-	kind := value.Kind()
-	tag := typ.Field(i).Tag.Get("db")
-	if !value.CanSet() {
-		return errors.New("结构体字段没有读写权限")
-	}
-
-	if len(meta) == 0 {
-		continue
-	}
-	meta, ok := m[tag]
-	if !ok {
-		continue
-	}
-
-	if kind == reflect.Struct {
-
-		fmt.Println(kind)
-
-	} else if kind == reflect.String {
-		value.SetString(meta)
-	} else if kind == reflect.Float32 {
-		f, err := strconv.ParseFloat(meta, 32)
-		if err != nil {
-			return err
-		}
-		value.SetFloat(f)
-	} else if kind == reflect.Float64 {
-		f, err := strconv.ParseFloat(meta, 64)
-		if err != nil {
-			return err
-		}
-		value.SetFloat(f)
-	} else if kind == reflect.Int64 {
-		integer64, err := strconv.ParseInt(meta, 10, 64)
-		if err != nil {
-			return err
-		}
-		value.SetInt(integer64)
-	} else if kind == reflect.Int {
-		integer, err := strconv.Atoi(meta)
-		if err != nil {
-			return err
-		}
-		value.SetInt(int64(integer))
-	} else if kind == reflect.Int32 {
-		integer, err := strconv.ParseInt(meta, 10, 64)
-		if err != nil {
-			return err
-		}
-		value.SetInt(integer)
-	} else if kind == reflect.Bool {
-		b, err := strconv.ParseBool(meta)
-		if err != nil {
-			return err
-		}
-		value.SetBool(b)
-	} else if kind == reflect.Int8 {
-		integer, err := strconv.ParseInt(meta, 10, 64)
-		if err != nil {
-			return err
-		}
-		value.SetInt(integer)
-	} else {
-		fmt.Println(kind)
-		return errors.New("数据库映射存在不识别的数据类型")
-	}
-*/
-
-func rowsToList(rows *sql.Rows, in interface{}) error {
-
-	d, err := rowsToMaps(rows)
-	if err != nil {
-		return err
-	}
-
-	length := len(d)
-
-	if length > 0 {
-		v := reflect.ValueOf(in).Elem()
-
-		newv := reflect.MakeSlice(v.Type(), 0, length)
-		v.Set(newv)
-		v.SetLen(length)
-
-		index := 0
-		for i := 0; i < length; i++ {
-
-			k := v.Type().Elem()
-
-			newObj := reflect.New(k)
-			err := mapReflect(d[i], newObj)
-			if err != nil {
-				return err
-			}
-
-			v.Index(index).Set(newObj.Elem())
-			index++
-		}
-		v.SetLen(index)
-	}
-	return nil
-}
-func rowsToStruct(rows *sql.Rows, out interface{}) error {
-
-	column, err := rows.Columns() //读出查询出的列字段名
-	if err != nil {
-		//logger.Error(err)
-		return err
-	}
-
-	values := make([][]byte, len(column))     //values是每个列的值，这里获取到byte里
-	scans := make([]interface{}, len(column)) //因为每次查询出来的列是不定长的，用len(column)定住当次查询的长度
-
-	for i := range values {
-
-		scans[i] = &values[i]
-	}
-
-	for rows.Next() {
-
-		if err := rows.Scan(scans...); err != nil {
-			//query.Scan查询出来的不定长值放到scans[i] = &values[i],也就是每行都放在values里
-			return err
-		}
-
-		row := make(map[string]string) //每行数据
-		for k, v := range values {
-			//每行数据是放在values里面，现在把它挪到row里
-			key := column[k]
-			row[key] = string(v)
-		}
-
-		mapToStruct(row, out)
-		return nil
-	}
-
-	return errors.New("not found rows")
-}
-
-func rowsToMap(rows *sql.Rows) (map[string]string, error) {
-
-	column, err := rows.Columns() //读出查询出的列字段名
-	if err != nil {
-		//logger.Error(err)
-		return nil, err
-	}
-
-	values := make([][]byte, len(column))     //values是每个列的值，这里获取到byte里
-	scans := make([]interface{}, len(column)) //因为每次查询出来的列是不定长的，用len(column)定住当次查询的长度
-
-	for i := range values {
-
-		scans[i] = &values[i]
-	}
-
-	for rows.Next() {
-
-		if err := rows.Scan(scans...); err != nil {
-			//query.Scan查询出来的不定长值放到scans[i] = &values[i],也就是每行都放在values里
-			//logger.Error(err)
-			return nil, err
-		}
-
-		row := make(map[string]string) //每行数据
-		for k, v := range values {
-			//每行数据是放在values里面，现在把它挪到row里
-			key := column[k]
-			row[key] = string(v)
-		}
-		return row, nil
-	}
-
-	return nil, errors.New("not found rows")
-}
-
-func rowsToMaps(rows *sql.Rows) ([]map[string]string, error) {
-
-	column, err := rows.Columns() //读出查询出的列字段名
-	if err != nil {
-		//logger.Error(err)
-		return nil, err
-	}
-
-	values := make([][]byte, len(column))     //values是每个列的值，这里获取到byte里
-	scans := make([]interface{}, len(column)) //因为每次查询出来的列是不定长的，用len(column)定住当次查询的长度
-
-	for i := range values {
-
-		scans[i] = &values[i]
-	}
-
-	results := make([]map[string]string, 0) //最后得到的map
-	for rows.Next() {
-
-		if err := rows.Scan(scans...); err != nil {
-			//query.Scan查询出来的不定长值放到scans[i] = &values[i],也就是每行都放在values里
-			//logger.Error(err)
-			return nil, err
-		}
-
-		row := make(map[string]string) //每行数据
-		for k, v := range values {
-			//每行数据是放在values里面，现在把它挪到row里
-			key := column[k]
-			row[key] = string(v)
-		}
-		results = append(results, row)
-	}
-
-	return results, nil
 }
 
 func Int(f string) int {
