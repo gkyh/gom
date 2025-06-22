@@ -2,54 +2,125 @@ package gom
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
+func getTable(class interface{}) string {
+
+	var table string
+	se := reflect.TypeOf(class).String()
+	//se := fmt.Sprintf("%v", ts)
+
+	idx := strings.LastIndex(se, ".")
+	if idx > 0 {
+
+		idx++
+		ss := string([]rune(se)[idx:len(se)])
+		table = strings.ToLower(ss)
+	} else {
+		table = se
+	}
+
+	return prefix + table
+}
+
+// arr 为struct Slice 或 strcut Slice 指针
+func (m *ConDB) StructModel(arr interface{}) *ConDB {
+
+	t := reflect.TypeOf(arr)
+
+	// 判断 arr 是否指针
+	if t.Kind() != reflect.Ptr {
+
+		// 确保 arr 是切片
+		if t.Kind() == reflect.Slice {
+
+			// 获取切片的元素类型
+			elemType := t.Elem()
+			if elemType.Kind() == reflect.Struct {
+				//fmt.Println("Struct Name:", elemType.Name())
+				return m.Table(prefix + strings.ToLower(elemType.Name()))
+			} else {
+				fmt.Println("Not a struct slice")
+			}
+		}
+		return m
+
+	}
+
+	// 解除指针，获取实际的切片类型
+	elemType := t.Elem()
+	if elemType.Kind() == reflect.Slice {
+
+		// 获取切片的元素类型
+		structType := elemType.Elem()
+		if structType.Kind() == reflect.Struct {
+			//fmt.Println("Struct Name:", structType.Name())
+			return m.Table(prefix + strings.ToLower(structType.Name()))
+		} else {
+			fmt.Println("Not a struct slice")
+		}
+	}
+
+	return m
+
+}
+
 // ///////////////////////单行数据映射Struct////////////////////////////
-func RowToStruct(rows *sql.Rows, out interface{}) error {
-	cols, err := rows.Columns()
-	if err != nil {
+func RowToStruct(row *sql.Row, out interface{}) error {
+	cols := getFieldMap(reflect.TypeOf(out).Elem())
+	dest := make([]interface{}, len(cols))
+	scan := make([]interface{}, len(cols))
+	for i := range scan {
+		scan[i] = &dest[i]
+	}
+
+	if err := row.Scan(scan...); err != nil {
 		return err
 	}
 
-	if !rows.Next() {
-		return sql.ErrNoRows
-	}
-
-	eleType := reflect.TypeOf(out).Elem()
-	fieldMap := getFieldMap(eleType)
 	element := reflect.ValueOf(out).Elem()
+	for _, idx := range cols {
+		field := element.FieldByIndex(idx.Index)
+		raw := dest[idx.Index[0]]
 
-	scanVals := make([]interface{}, len(cols))
-	scanDests := make([]interface{}, len(cols))
-	for i := range scanVals {
-		scanDests[i] = &scanVals[i]
-	}
-
-	if err := rows.Scan(scanDests...); err != nil {
-		return err
-	}
-
-	for i, col := range cols {
-		idx, ok := fieldMap[strings.ToLower(col)]
-		if !ok {
+		if raw == nil {
 			continue
 		}
-		field := element.FieldByIndex(idx.Index)
-		val := reflect.ValueOf(scanVals[i])
+
+		fieldType := field.Type()
+
+		if fieldType == reflect.TypeOf(time.Time{}) {
+			switch v := raw.(type) {
+			case time.Time:
+				field.Set(reflect.ValueOf(v))
+			case []byte:
+				if t, err := parseTime(string(v)); err == nil {
+					field.Set(reflect.ValueOf(t))
+				}
+			case string:
+				if t, err := parseTime(v); err == nil {
+					field.Set(reflect.ValueOf(t))
+				}
+			}
+			continue
+		}
+
+		val := reflect.ValueOf(raw)
 		if val.Kind() == reflect.Ptr && val.IsNil() {
 			continue
 		}
 		if val.Kind() == reflect.Ptr {
 			val = val.Elem()
 		}
-		if val.Type().ConvertibleTo(field.Type()) {
-			field.Set(val.Convert(field.Type()))
+		if val.IsValid() && val.Type().ConvertibleTo(fieldType) {
+			field.Set(val.Convert(fieldType))
 		}
 	}
-
 	return nil
 }
 
@@ -58,7 +129,6 @@ func RowsToMap(rows *sql.Rows) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	if !rows.Next() {
 		return nil, sql.ErrNoRows
 	}
@@ -75,15 +145,21 @@ func RowsToMap(rows *sql.Rows) (map[string]interface{}, error) {
 
 	rowMap := make(map[string]interface{})
 	for i, col := range columns {
-		val := reflect.ValueOf(scanVals[i])
-		if val.Kind() == reflect.Ptr && val.IsNil() {
+		val := scanVals[i]
+
+		switch v := val.(type) {
+		case nil:
 			rowMap[col] = nil
-			continue
+		case []byte:
+			s := string(v)
+			if t, err := parseTime(s); err == nil {
+				rowMap[col] = t
+			} else {
+				rowMap[col] = s
+			}
+		default:
+			rowMap[col] = v
 		}
-		if val.Kind() == reflect.Ptr {
-			val = val.Elem()
-		}
-		rowMap[col] = val.Interface()
 	}
 	return rowMap, nil
 }
@@ -108,15 +184,20 @@ func RowsToMaps(rows *sql.Rows) ([]map[string]interface{}, error) {
 
 		rowMap := make(map[string]interface{})
 		for i, col := range columns {
-			val := reflect.ValueOf(scanVals[i])
-			if val.Kind() == reflect.Ptr && val.IsNil() {
+			val := scanVals[i]
+			switch v := val.(type) {
+			case nil:
 				rowMap[col] = nil
-				continue
+			case []byte:
+				s := string(v)
+				if t, err := parseTime(s); err == nil {
+					rowMap[col] = t
+				} else {
+					rowMap[col] = s
+				}
+			default:
+				rowMap[col] = v
 			}
-			if val.Kind() == reflect.Ptr {
-				val = val.Elem()
-			}
-			rowMap[col] = val.Interface()
 		}
 		results = append(results, rowMap)
 	}
@@ -176,7 +257,6 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 		out[strings.ToLower(tag)] = fieldIndex{Index: idx, Type: f.Type}
 	}
 }
-
 func RowsToList(rows *sql.Rows, out interface{}) error {
 	columns, err := rows.Columns()
 	if err != nil {
@@ -189,34 +269,76 @@ func RowsToList(rows *sql.Rows, out interface{}) error {
 
 	for rows.Next() {
 		element := reflect.New(eleType).Elem()
-		scanDest := make([]interface{}, len(columns))
 		scanVals := make([]interface{}, len(columns))
+		scanDest := make([]interface{}, len(columns))
 		for i := range scanVals {
 			scanDest[i] = &scanVals[i]
 		}
+
 		if err := rows.Scan(scanDest...); err != nil {
 			return err
 		}
 
 		for i, col := range columns {
+			raw := scanVals[i]
+			if raw == nil {
+				continue
+			}
+
 			idx, ok := fieldMap[strings.ToLower(col)]
 			if !ok {
 				continue
 			}
+
 			field := element.FieldByIndex(idx.Index)
-			val := reflect.ValueOf(scanVals[i])
+			fieldType := field.Type()
+
+			// 时间类型特殊处理
+			if fieldType == reflect.TypeOf(time.Time{}) {
+				switch v := raw.(type) {
+				case time.Time:
+					field.Set(reflect.ValueOf(v))
+				case []byte:
+					if t, err := parseTime(string(v)); err == nil {
+						field.Set(reflect.ValueOf(t))
+					}
+				case string:
+					if t, err := parseTime(v); err == nil {
+						field.Set(reflect.ValueOf(t))
+					}
+				}
+				continue
+			}
+
+			// 通用处理
+			val := reflect.ValueOf(raw)
 			if val.Kind() == reflect.Ptr && val.IsNil() {
 				continue
 			}
 			if val.Kind() == reflect.Ptr {
 				val = val.Elem()
 			}
-			if val.Type().ConvertibleTo(field.Type()) {
-				field.Set(val.Convert(field.Type()))
+			if val.IsValid() && val.Type().ConvertibleTo(fieldType) {
+				field.Set(val.Convert(fieldType))
 			}
 		}
+
 		sliceValue.Set(reflect.Append(sliceValue, element))
 	}
+
 	return rows.Err()
 }
 
+func parseTime(s string) (time.Time, error) {
+	layouts := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+		"2006-01-02 15:04:05.999999",
+	}
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid time format: %s", s)
+}

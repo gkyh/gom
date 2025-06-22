@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type SqlExecutor interface {
@@ -19,24 +18,21 @@ type SqlExecutor interface {
 	Where(query string, values ...interface{}) *ConDB
 	Maps(maps map[string]interface{}) *ConDB
 	Or(query string, values ...interface{}) *ConDB
-	IN(key string, value string) *ConDB
+	In(key string, values []interface{}) *ConDB
 	GroupBy(value string) *ConDB
 	Count(agrs ...interface{}) int64
-	PageSize(size int32) int32
-	Find(out interface{}) *ConDB
+	Find(out interface{}) error
 
 	Select(args string) *ConDB
 	Sort(key, sort string) *ConDB
 	Page(cur, count int32) *ConDB
 
-	Flush(c interface{}) error
 	Update(field string, values ...interface{}) error
 	UpdateMap(maps map[string]interface{}) error
 	Delete(i ...interface{}) error
 	Insert(i interface{}) error
 	SelectInt(field string) int64
 	SelectStr(field string) string
-	QueryField(field string, out interface{}) error
 	Field(field string) *ConDB
 
 	Get(out interface{}) error
@@ -58,7 +54,6 @@ type SqlExecutor interface {
 
 	List() ([]map[string]interface{}, error)
 	Query() (map[string]interface{}, error)
-	Pagination(currentPage, pageSize, totalPage int32) (page int32)
 }
 
 var _ SqlExecutor = &ConDB{}
@@ -66,22 +61,13 @@ var _ SqlExecutor = &ConDB{}
 var prefix string = "tb_"
 
 type ConDB struct {
-	Db          *sql.DB
-	parent      *ConDB
-	tx          *sql.Tx
-	query       string
-	inCondition string
-	params      []interface{}
-	Condition   []map[string]interface{}
-	OrCondition []map[string]interface{}
-	table       string
-	field       string
-	Offset      int32
-	Limit       int32
-	sort        string
-	group       string
-	Err         error
-	Result      sql.Result
+	Db     *sql.DB
+	parent *ConDB
+	tx     *sql.Tx
+
+	Err     error
+	Result  sql.Result
+	builder *SQLBuilder
 }
 
 var logger SqlLogger
@@ -115,7 +101,12 @@ func (m *ConDB) trace(query string, args ...interface{}) {
 
 func (m *ConDB) clone() *ConDB {
 
-	db := &ConDB{Db: m.Db, parent: m, tx: nil, inCondition: "", query: "", table: "", Condition: nil, field: "*", Offset: 0, Limit: 0, sort: "", group: ""}
+	db := &ConDB{
+		Db:      m.Db,
+		parent:  m,
+		tx:      nil,
+		builder: NewSQLBuilder(),
+	}
 	return db
 }
 
@@ -125,13 +116,12 @@ func (m *ConDB) Model(class interface{}) *ConDB {
 	if m.parent == nil {
 
 		db := m.clone()
-		db.table = getTable(class)
+
+		db.builder.From(getTable(class))
 		return db
 	} else {
 
-		if m.table == "" {
-			m.table = getTable(class)
-		}
+		m.builder.From(getTable(class))
 		return m
 	}
 
@@ -140,142 +130,27 @@ func (m *ConDB) Table(name string) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
-		db.table = name
+		db.builder.From(name)
 		return db
 	} else {
 
-		m.table = name
+		m.builder.From(name)
 		return m
 	}
 }
 
-// arr 为struct Slice 或 strcut Slice 指针
-func (m *ConDB) StructModel(arr interface{}) *ConDB {
-
-	t := reflect.TypeOf(arr)
-
-	// 判断 arr 是否指针
-	if t.Kind() != reflect.Ptr {
-
-		// 确保 arr 是切片
-		if t.Kind() == reflect.Slice {
-
-			// 获取切片的元素类型
-			elemType := t.Elem()
-			if elemType.Kind() == reflect.Struct {
-				//fmt.Println("Struct Name:", elemType.Name())
-				return m.Table(prefix + strings.ToLower(elemType.Name()))
-			} else {
-				fmt.Println("Not a struct slice")
-			}
-		}
-		return m
-
-	}
-
-	// 解除指针，获取实际的切片类型
-	elemType := t.Elem()
-	if elemType.Kind() == reflect.Slice {
-
-		// 获取切片的元素类型
-		structType := elemType.Elem()
-		if structType.Kind() == reflect.Struct {
-			//fmt.Println("Struct Name:", structType.Name())
-			return m.Table(prefix + strings.ToLower(structType.Name()))
-		} else {
-			fmt.Println("Not a struct slice")
-		}
-	}
-
-	return m
-
-}
 func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 
 	if m.parent == nil {
 		db := m.clone()
-		db.Condition = append(db.Condition, map[string]interface{}{"query": query, "args": values})
+
+		db.builder.Where(query, values...)
 		return db
 	} else {
 
-		m.Condition = append(m.Condition, map[string]interface{}{"query": query, "args": values})
+		m.builder.Where(query, values...)
 		return m
 	}
-}
-func (m *ConDB) Field(field string) *ConDB {
-
-	m.field = field
-	return m
-}
-
-func (m *ConDB) TxBegin() *ConDB {
-
-	tx, _ := m.Db.Begin()
-
-	if m.parent == nil {
-		db := m.clone()
-		db.tx = tx
-		return db
-	} else {
-
-		m.tx = tx
-		return m
-	}
-}
-func (m *ConDB) Tx(tx *sql.Tx) *ConDB {
-
-	if m.parent == nil {
-		db := m.clone()
-		db.tx = tx
-		return db
-	} else {
-
-		m.tx = tx
-		return m
-	}
-}
-
-func (m *ConDB) Commit() error {
-
-	return m.tx.Commit()
-}
-
-func (m *ConDB) Rollback() error {
-
-	return m.tx.Rollback()
-}
-
-func (m *ConDB) Maps(maps map[string]interface{}) *ConDB {
-
-	if m.parent == nil {
-		db := m.clone()
-		if maps != nil && len(maps) > 0 {
-
-			for k, v := range maps {
-				if m_type(v) == "string" && v == "" { //忽略空
-					continue
-				}
-				query := k + " = ? "
-				db.Where(query, v)
-			}
-		}
-		return db
-	} else {
-
-		if maps != nil && len(maps) > 0 {
-
-			for k, v := range maps {
-				if m_type(v) == "string" && v == "" { //忽略空
-					continue
-				}
-				query := k + " = ? "
-				m.Where(query, v)
-
-			}
-		}
-		return m
-	}
-
 }
 
 func (db *ConDB) Select(args string) *ConDB {
@@ -283,514 +158,105 @@ func (db *ConDB) Select(args string) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
-	db.field = args
+	db.builder.Select(args)
 	return db
 }
 
-func m_type(i interface{}) string {
-	switch i.(type) {
-	case string:
-		return "string"
-	case int:
-		return "number"
-	case int32:
-		return "number"
-	case int64:
-		return "number"
-	case float64:
-		return "number"
-	case uint32:
-		return "number"
-	case uint64:
-		return "number"
-	case []string:
-		return "strings"
-	default:
-		return ""
-	}
+func (m *ConDB) Field(field string) *ConDB {
 
-}
-func getTable(class interface{}) string {
-
-	var table string
-	se := reflect.TypeOf(class).String()
-	//se := fmt.Sprintf("%v", ts)
-
-	idx := strings.LastIndex(se, ".")
-	if idx > 0 {
-
-		idx++
-		ss := string([]rune(se)[idx:len(se)])
-		table = strings.ToLower(ss)
-	} else {
-		table = se
-	}
-
-	return prefix + table
+	m.builder.fields = field
+	return m
 }
 
-func (m *ConDB) Flush(c interface{}) error {
+func (m *ConDB) Or(query string, args ...interface{}) *ConDB {
 
-	var db *ConDB
 	if m.parent == nil {
-
-		db = m.clone()
-	} else {
-		db = m
+		return nil
 	}
-
-	s := bytes.Buffer{}
-
-	s.WriteString("UPDATE ")
-
-	if db.table == "" {
-
-		s.WriteString(getTable(c))
-	} else {
-
-		s.WriteString(db.table)
-	}
-
-	s.WriteString(" set ")
-
-	val := reflect.ValueOf(c)
-	typ := reflect.TypeOf(c)
-
-	_, ins := typ.MethodByName("PreUpdate")
-	if ins {
-		mv := val.MethodByName("PreUpdate")
-		mv.Call(nil)
-	}
-
-	data := toMap(val, typ)
-	buff := bytes.NewBuffer([]byte{})
-
-	var id interface{}
-	for k, v := range data {
-
-		if k == "id" {
-			id = v
-			continue
-		}
-		buff.WriteString(",")
-		buff.WriteString(k)
-		buff.WriteString("= ? ")
-
-		//buff.WriteString(parseString(v))
-		db.params = append(db.params, v)
-
-	}
-
-	sql := strings.TrimLeft(buff.String(), `,`)
-
-	s.WriteString(sql)
-	s.WriteString(" where id = ?")
-
-	//p := getKey(c, "Id")
-	db.params = append(db.params, id)
-
-	db.trace(s.String(), db.params...)
-
-	if db.tx == nil {
-		db.Result, db.Err = db.Db.Exec(s.String(), db.params...)
-
-	} else {
-		db.Result, db.Err = db.tx.Exec(s.String(), db.params...)
-
-	}
-
-	if db.Err != nil {
-
-		return db.Err
-	}
-
-	aff_nums, err := db.Result.RowsAffected()
-	if err == nil {
-		db.trace("RowsAffected num:", aff_nums)
-	} else {
-		db.trace("RowsAffected error:%v", err)
-	}
-
-	return err
-
-}
-func (db *ConDB) UpdateMap(maps map[string]interface{}) error {
-
-	if db.parent == nil {
-
-		db.trace("doesn't init ConDB")
-		return errors.New("doesn't init ConDB")
-	}
-	sql := buildUpdateSQL(maps)
-	s := bytes.Buffer{}
-
-	s.WriteString("UPDATE ")
-	s.WriteString(db.table)
-	s.WriteString(sql)
-	s.WriteString(db.buildSql())
-
-	db.trace(s.String(), db.params...)
-
-	if db.tx == nil {
-		db.Result, db.Err = db.Db.Exec(s.String(), db.params...)
-
-	} else {
-		db.Result, db.Err = db.tx.Exec(s.String(), db.params...)
-
-	}
-
-	if db.Err != nil {
-
-		return db.Err
-	}
-
-	aff_nums, err := db.Result.RowsAffected()
-	if err == nil {
-		db.trace("RowsAffected num:", aff_nums)
-		/*if aff_nums == 0 {
-
-			return errors.New("RowsAffected rows is 0")
-		}*/
-	} else {
-		db.trace("RowsAffected error:%v", err)
-	}
-
-	return err
-
+	m.builder.Or(query, args...)
+	return m
 }
 
-func buildUpdateSQL(data map[string]interface{}) string {
-	if len(data) == 0 {
-		return ""
-	}
-	var setClauses []string
+func (m *ConDB) In(key string, values []interface{}) *ConDB {
 
-	for key, value := range data {
-		setClauses = append(setClauses, fmt.Sprintf("%s = %s", key, formatValue(value)))
+	if m.parent == nil {
+		return nil
 	}
-
-	return fmt.Sprintf(" SET %s", strings.Join(setClauses, ", "))
+	m.builder.In(key, values)
+	return m
 }
 
-func formatValue(value interface{}) string {
+func (m *ConDB) IN(field string, value interface{}) *ConDB {
+	if m.parent == nil {
+		return nil
+	}
+
+	var list []interface{}
+
 	switch v := value.(type) {
 	case string:
-		return fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''")) // 转义单引号
-	case nil:
-		return "NULL"
+		// 处理 "1,2,3" 格式
+		if strings.Contains(v, ",") {
+			parts := strings.Split(v, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					list = append(list, p)
+				}
+			}
+		} else if v != "" {
+			list = append(list, v)
+		}
+	case []string:
+		for _, p := range v {
+			list = append(list, p)
+		}
+	case []int:
+		for _, p := range v {
+			list = append(list, p)
+		}
+	case []interface{}:
+		list = v
 	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-func (db *ConDB) Update(field string, values ...interface{}) error {
-
-	if db.parent == nil {
-
-		db.trace("doesn't init ConDB")
-		return errors.New("doesn't init ConDB")
-	}
-	s := bytes.Buffer{}
-
-	s.WriteString("UPDATE ")
-	s.WriteString(db.table)
-	s.WriteString(" set ")
-	s.WriteString(field)
-
-	s.WriteString(db.buildSql())
-
-	params := append(values, db.params...)
-
-	db.trace(s.String(), db.params...)
-
-	if db.tx == nil {
-		db.Result, db.Err = db.Db.Exec(s.String(), params...)
-
-	} else {
-		db.Result, db.Err = db.tx.Exec(s.String(), params...)
-
+		list = append(list, v)
 	}
 
-	if db.Err != nil {
-
-		return db.Err
+	if len(list) == 0 {
+		return m
 	}
 
-	aff_nums, err := db.Result.RowsAffected()
-	if err == nil {
-		db.trace("RowsAffected num:", aff_nums)
-		/*if aff_nums == 0 {
-
-			return errors.New("RowsAffected rows is 0")
-		}*/
-	} else {
-		db.trace("RowsAffected error:%v", err)
-	}
-
-	return err
-
+	m.builder.In(field, list) // 只调用，不接收返回值
+	return m
 }
 
-func (m *ConDB) Exec(sql string, params ...interface{}) (sql.Result, error) {
+func (m *ConDB) GroupBy(field string) *ConDB {
 
-	var db *ConDB
 	if m.parent == nil {
-
-		db = m.clone()
-	} else {
-		db = m
+		return nil
 	}
 
-	db.trace(sql, params...)
-
-	if db.tx == nil {
-		db.Result, db.Err = db.Db.Exec(sql, params...)
-
-	} else {
-		db.Result, db.Err = db.tx.Exec(sql, params...)
-
-	}
-
-	return db.Result, db.Err
-
+	m.builder.GroupBy(field)
+	return m
 }
 
-func (db *ConDB) Delete(i ...interface{}) error {
+func (m *ConDB) OrderBy(field string) *ConDB {
 
-	if len(i) > 0 {
-
-		c := i[0]
-		key := reflect.ValueOf(c).Elem().FieldByName("Id")
-
-		if !key.IsValid() {
-
-			db.trace("doesn't found key")
-			return errors.New("doesn't found key")
-		}
-		//db1 := db.clone()
-		id := fmt.Sprintf("%d", key)
-		return db.Model(c).Where("id=?", id).delete()
-
-	} else {
-
-		return db.delete()
-	}
-
-}
-
-func (db *ConDB) delete() error {
-
-	if db.parent == nil {
-		db.trace("doesn't init ConDB,need first get new ConDB")
-		return errors.New("doesn't init ConDB,need first get new ConDB")
-	}
-	if db.table == "" {
-
-		db.trace("no defined table name ")
-		return errors.New("not defined table name")
-	}
-	s := bytes.Buffer{}
-
-	s.WriteString("DELETE  FROM ")
-	s.WriteString(db.table)
-
-	s.WriteString(db.buildSql())
-
-	db.trace(s.String(), db.params...)
-
-	if db.tx == nil {
-		db.Result, db.Err = db.Db.Exec(s.String(), db.params...)
-
-	} else {
-		db.Result, db.Err = db.tx.Exec(s.String(), db.params...)
-
-	}
-
-	if db.Err != nil {
-
-		db.trace("error:%v", db.Err)
-		return db.Err
-	}
-
-	aff_nums, err := db.Result.RowsAffected()
-	if err == nil {
-		db.trace("RowsAffected num:", aff_nums)
-	} else {
-		db.trace("RowsAffected error:%v", err)
-	}
-
-	return err
-}
-
-func into(field string) string {
-
-	arry := strings.Split(field, ",")
-
-	pty := strings.Repeat("?,", len(arry))
-
-	vas := strings.TrimRight(pty, `,`)
-	return vas
-}
-
-func sets(field string) string {
-
-	return strings.Replace(field, ",", "=?,", -1) + "=?"
-}
-
-func (m *ConDB) Save(table, field string, key interface{}, args []interface{}) error {
-
-	var db *ConDB
 	if m.parent == nil {
-
-		db = m.clone()
-	} else {
-		db = m
+		return nil
 	}
 
-	sql := `update ` + table + ` set ` + sets(field) + ` where id = ?`
-
-	args = append(args, key)
-	db.trace(sql, args...)
-	if db.tx == nil {
-
-		db.Result, db.Err = db.Db.Exec(sql, args...)
-	} else {
-		db.Result, db.Err = db.tx.Exec(sql, args...)
-	}
-
-	if db.Err != nil {
-
-		return db.Err
-	}
-
-	aff_nums, err := db.Result.RowsAffected()
-	if err == nil {
-		db.trace("RowsAffected num:", aff_nums)
-	} else {
-		db.trace("RowsAffected error:%v", err)
-	}
-
-	return err
-
-}
-
-func (m *ConDB) Add(table, field string, args []interface{}) error {
-
-	var db *ConDB
-	if m.parent == nil {
-
-		db = m.clone()
-	} else {
-		db = m
-	}
-
-	sql := `insert into ` + table + ` (` + field + `) values (` + into(field) + `)`
-
-	db.trace(sql, args...)
-	if db.tx == nil {
-
-		db.Result, db.Err = db.Db.Exec(sql, args...)
-	} else {
-		db.Result, db.Err = db.tx.Exec(sql, args...)
-	}
-
-	if db.Err != nil {
-
-		return db.Err
-	}
-
-	insID, err := db.Result.LastInsertId()
-	if err == nil {
-		db.trace("RowsAffected num:", insID)
-	} else {
-		db.trace("RowsAffected error:", err)
-	}
-
-	return err
-
-}
-
-func (m *ConDB) Insert(i interface{}) error {
-
-	var db *ConDB
-	if m.parent == nil {
-
-		db = m.clone()
-	} else {
-		db = m
-	}
-	s := bytes.Buffer{}
-
-	s.WriteString("INSERT INTO  ")
-
-	if db.table == "" {
-
-		s.WriteString(getTable(i))
-	} else {
-
-		s.WriteString(db.table)
-	}
-
-	s.WriteString(insertSql(i))
-
-	db.trace(s.String())
-
-	//var ret sql.Result
-	//var err error
-	if db.tx == nil {
-
-		db.Result, db.Err = db.Db.Exec(s.String())
-	} else {
-		db.Result, db.Err = db.tx.Exec(s.String())
-	}
-
-	if db.Err != nil {
-
-		return db.Err
-	}
-
-	insID, err := db.Result.LastInsertId()
-	if err == nil {
-		db.trace("RowsAffected num:", insID)
-
-		key := reflect.ValueOf(i).Elem().FieldByName("Id")
-		typ, _ := reflect.TypeOf(i).Elem().FieldByName("Id")
-
-		tp := typ.Type.Name()
-
-		if tp == "int" {
-
-			newValue := reflect.ValueOf(int(insID))
-			key.Set(newValue)
-		} else if tp == "int32" {
-
-			newValue := reflect.ValueOf(int32(insID))
-			key.Set(newValue)
-		} else if tp == "int64" {
-
-			newValue := reflect.ValueOf(insID)
-			key.Set(newValue)
-		}
-
-	} else {
-		db.trace("RowsAffected error:", err)
-	}
-
-	return err
-}
-
-func (db *ConDB) InsertId() int64 {
-
-	insID, _ := db.Result.LastInsertId()
-	return insID
+	m.builder.OrderBy(field)
+	return m
 }
 
 func (db *ConDB) Sort(key, sort string) *ConDB {
 	if db.parent == nil {
 		return nil
 	}
-	db.sort = fmt.Sprintf(" ORDER BY %s %s ", key, sort)
+	db.builder.OrderBy(fmt.Sprintf("%s %s", key, sort))
 	return db
 }
+
 func (db *ConDB) Page(cur, count int32) *ConDB {
 	if db.parent == nil {
 		return nil
@@ -799,216 +265,167 @@ func (db *ConDB) Page(cur, count int32) *ConDB {
 	if start < 0 {
 		start = 0
 	}
-	db.Offset = start
-	db.Limit = count
+
+	db.builder.Limit(start, count)
 	return db
 }
 
-func (db *ConDB) Or(query string, values ...interface{}) *ConDB {
-	if db.parent == nil {
+func (m *ConDB) Limit(offset, size int32) *ConDB {
+
+	if m.parent == nil {
 		return nil
 	}
-	db.OrCondition = append(db.OrCondition, map[string]interface{}{"query": query, "args": values})
-	return db
+
+	m.builder.Limit(offset, size)
+	return m
 }
 
-func (db *ConDB) IN(key string, value string) *ConDB {
-
-	if db.parent == nil {
-		return nil
-	}
-	db.inCondition = key + " IN (" + value + ") "
-
-	return db
+func m_type(v interface{}) string {
+	return fmt.Sprintf("%T", v)
 }
 
-func (db *ConDB) GroupBy(value string) *ConDB {
-	if db.parent == nil {
-		return nil
-	}
-	db.group = " group by " + value
-	return db
-}
-func (db *ConDB) PageSize(size int32) int32 {
-
-	total := int32(db.Count())
-
-	if total <= 0 {
-
-		return 0
-	}
-	var page int32
-	if total%size == 0 {
-		page = total / size
-	} else {
-		page = (total + size) / size
-	}
-
-	return page
-
-}
-func (db *ConDB) Count(agrs ...interface{}) int64 {
-
-	if db.parent == nil {
-		return 0
-	}
-	if db.table == "" {
-		if len(agrs) == 0 {
-			return 0
+func (m *ConDB) Maps(filters map[string]interface{}) *ConDB {
+	apply := func(target *ConDB) {
+		for k, v := range filters {
+			if m_type(v) == "string" && v == "" {
+				continue
+			}
+			target.Where(k+" = ?", v)
 		}
-		db.table = getTable(agrs[0])
+	}
+	if m.parent == nil {
+		db := m.clone()
+		apply(db)
+		return db
+	} else {
+		apply(m)
+		return m
+	}
+}
+
+func (m *ConDB) Count(args ...interface{}) int64 {
+	if m.parent == nil {
+		return 0
+	}
+	if m.builder.table == "" {
+		if len(args) > 0 {
+			table := getTable(args[0])
+			m.builder.From(table)
+		}
 	}
 
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT count(")
-	db_sql.WriteString(db.field)
-	db_sql.WriteString(") FROM ")
-	db_sql.WriteString(db.table)
-
-	db_sql.WriteString(db.buildSql())
-
-	if db.group != "" {
-
-		db_sql.WriteString(db.group)
+	field := "*"
+	if m.builder.fields != "" {
+		field = m.builder.fields
 	}
 
-	db.trace(db_sql.String(), db.params...)
+	sqlStr := bytes.Buffer{}
+	sqlStr.WriteString("SELECT COUNT(")
+	sqlStr.WriteString(field)
+	sqlStr.WriteString(") FROM ")
+	sqlStr.WriteString(m.builder.table)
+
+	sql, argsList := m.builder.Build()
+
+	// 提取 WHERE 子句（避免重复 FROM）
+	afterFrom := strings.SplitN(sql, "FROM "+m.builder.table, 2)
+	if len(afterFrom) == 2 {
+		sqlStr.WriteString(afterFrom[1])
+	}
+
+	m.trace(sqlStr.String(), argsList)
 
 	var count int64 = 0
-
-	err := db.Db.QueryRow(db_sql.String(), db.params...).Scan(&count)
+	err := m.Db.QueryRow(sqlStr.String(), argsList...).Scan(&count)
 	if err != nil {
-
-		db.Err = err
-
+		m.Err = err
 		return 0
 	}
-	//count, db.Err = db.dbmap.SelectInt(sql.String())
+
 	return count
-
 }
-func (db *ConDB) Find(out interface{}) *ConDB {
+
+func (db *ConDB) Find(out interface{}) error {
 
 	if db.parent == nil {
+
+		return fmt.Errorf("Lack of ConDB objects")
+	}
+	if db.builder.table == "" {
+
+		table := getTable(out)
+		db.builder.From(table)
+	}
+	sqlStr, args := db.builder.Build()
+
+	db.trace(sqlStr, args...)
+
+	rows, err := db.Db.Query(sqlStr, args...)
+	if err != nil {
+
+		return err
+	}
+	defer rows.Close()
+
+	return RowsToList(rows, out)
+}
+
+func (m *ConDB) FindAll(field string, limit, offset int64, out interface{}) *ConDB {
+	if m.parent == nil {
 		return nil
 	}
-	if db.table == "" {
+	table := getTable(out)
 
-		db.table = getTable(out)
+	if field == "" {
+		field = "*"
 	}
 
 	sqlStr := bytes.Buffer{}
 	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
+	sqlStr.WriteString(field)
 	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
+	sqlStr.WriteString(table)
 
-	sqlStr.WriteString(db.buildSql())
+	offsetCalc := (offset + 1) * limit
+	sqlStr.WriteString(" WHERE id >= ((SELECT id FROM ")
+	sqlStr.WriteString(table)
+	sqlStr.WriteString(" ORDER BY id DESC LIMIT 1) - ")
+	sqlStr.WriteString(strconv.FormatInt(offsetCalc, 10))
+	sqlStr.WriteString(")")
 
-	if db.group != "" {
+	sqlStr.WriteString(" ORDER BY id DESC")
+	sqlStr.WriteString(" LIMIT ")
+	sqlStr.WriteString(strconv.FormatInt(limit, 10))
 
-		sqlStr.WriteString(db.group)
-	}
-	if db.sort != "" {
+	m.trace(sqlStr.String(), nil)
 
-		sqlStr.WriteString(db.sort)
-	}
-
-	if db.Limit > 0 {
-
-		ls := fmt.Sprintf(" limit %d,%d", db.Offset, db.Limit)
-		sqlStr.WriteString(ls)
-	}
-
-	db.trace(sqlStr.String(), db.params...)
-
-	rows, err := db.Db.Query(sqlStr.String(), db.params...)
+	rows, err := m.Db.Query(sqlStr.String())
 	if err != nil {
-
-		db.Err = err
-		return db
+		m.Err = err
+		return m
 	}
 	defer rows.Close()
 
-	db.Err = RowsToList(rows, out)
-
-	//_, db.Err = db.dbmap.Select(out, sql.String())
-	return db
+	m.Err = RowsToList(rows, out)
+	return m
 }
-func (db *ConDB) FindAll(out interface{}) *ConDB {
 
-	if db.parent == nil {
-		return nil
-	}
-	if db.table == "" {
-
-		db.table = getTable(out)
-	}
-
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-
-	offset := (db.Offset + 1) * db.Limit
-	s := bytes.Buffer{}
-	s.WriteString(" where id >= ((SELECT id  FROM ")
-	s.WriteString(db.table)
-	s.WriteString(" order by id desc limit 1)-")
-	s.WriteString(strconv.FormatInt(int64(offset), 10))
-	s.WriteString(") ")
-
-	sqlStr.WriteString(s.String())
-
-	sqlStr.WriteString(" order by id desc ")
-
-	sqlStr.WriteString(" limit ")
-	sqlStr.WriteString(strconv.FormatInt(int64(db.Limit), 10))
-
-	db.trace(sqlStr.String(), nil)
-
-	rows, err := db.Db.Query(sqlStr.String())
-	if err != nil {
-
-		db.Err = err
-		return db
-	}
-	defer rows.Close()
-
-	db.Err = RowsToList(rows, out)
-
-	//_, db.Err = db.dbmap.Select(out, sql.String())
-	return db
-}
 func (db *ConDB) Query() (map[string]interface{}, error) {
 
 	if db.parent == nil {
 		return nil, errors.New("not found ConDB")
 	}
-	if db.table == "" {
+	if db.builder.table == "" {
 
 		return nil, errors.New("not found table")
 	}
 
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
+	sqlStr, args := db.builder.Build()
+	sqlStr += " LIMIT 1" // ✅ 限制只取一条
 
-	sqlStr.WriteString(db.buildSql())
+	db.trace(sqlStr, args...)
 
-	if db.group != "" {
-
-		sqlStr.WriteString(db.group)
-	}
-
-	sqlStr.WriteString(" limit 1")
-
-	db.trace(sqlStr.String(), db.params...)
-
-	rows, err := db.Db.Query(sqlStr.String(), db.params...)
+	rows, err := db.Db.Query(sqlStr, args...)
 	if err != nil {
 
 		return nil, err
@@ -1016,44 +433,23 @@ func (db *ConDB) Query() (map[string]interface{}, error) {
 	defer rows.Close()
 
 	return RowsToMap(rows)
-
 }
+
 func (db *ConDB) List() ([]map[string]interface{}, error) {
 
 	if db.parent == nil {
 		return nil, errors.New("not found ConDB")
 	}
-	if db.table == "" {
+	if db.builder.table == "" {
 
 		return nil, errors.New("not found table")
 	}
 
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
+	sqlStr, params := db.builder.Build()
 
-	sqlStr.WriteString(db.buildSql())
+	db.trace(sqlStr, params...)
 
-	if db.group != "" {
-
-		sqlStr.WriteString(db.group)
-	}
-	if db.sort != "" {
-
-		sqlStr.WriteString(db.sort)
-	}
-
-	if db.Limit > 0 {
-
-		ls := fmt.Sprintf(" limit %d,%d", db.Offset, db.Limit)
-		sqlStr.WriteString(ls)
-	}
-
-	db.trace(sqlStr.String(), db.params...)
-
-	rows, err := db.Db.Query(sqlStr.String(), db.params...)
+	rows, err := db.Db.Query(sqlStr, params...)
 	if err != nil {
 
 		return nil, err
@@ -1066,124 +462,80 @@ func (db *ConDB) List() ([]map[string]interface{}, error) {
 func (db *ConDB) SelectInt(field string) int64 {
 
 	var out int64
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT ")
-	db_sql.WriteString(field)
-	db_sql.WriteString(" FROM ")
-	db_sql.WriteString(db.table)
+	db_sql, params := db.builder.Build()
 
-	db_sql.WriteString(db.buildSql())
+	db_sql += " limit 1"
 
-	db_sql.WriteString(" limit 1")
+	db.trace(db_sql, params...)
 
-	db.trace(db_sql.String(), db.params...)
-
-	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
+	db.Err = db.Db.QueryRow(db_sql, params...).Scan(&out)
 	return out
 }
 func (db *ConDB) SelectStr(field string) string {
 
 	var out string
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT ")
-	db_sql.WriteString(field)
-	db_sql.WriteString(" FROM ")
-	db_sql.WriteString(db.table)
+	db_sql, params := db.builder.Build()
 
-	db_sql.WriteString(db.buildSql())
+	db_sql += " limit 1"
 
-	db_sql.WriteString(" limit 1")
+	db.trace(db_sql, params...)
 
-	db.trace(db_sql.String(), db.params...)
+	db.Err = db.Db.QueryRow(db_sql, params...).Scan(&out)
 
-	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
 	return out
 }
-func (db *ConDB) QueryField(field string, out interface{}) error {
 
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT ")
-	db_sql.WriteString(field)
-	db_sql.WriteString(" FROM ")
-	db_sql.WriteString(db.table)
-
-	db_sql.WriteString(db.buildSql())
-
-	db.trace(db_sql.String(), db.params...)
-
-	rows, err := db.Db.Query(db_sql.String(), db.params...)
-	if err != nil {
-
-		//fmt.Errorf("gorp: cannot SELECT into this type: %v", err)
-		return err
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		return sql.ErrNoRows
-	}
-
-	defer rows.Close()
-
-	return rows.Scan(out)
-}
-
-func (db *ConDB) IsExit() (bool, error) {
-
-	if db.parent == nil {
+func (m *ConDB) IsExit() (bool, error) {
+	if m.parent == nil {
 		return false, errors.New("no found model")
 	}
 
-	var out int64
-
-	db_sql := bytes.Buffer{}
-	db_sql.WriteString("SELECT 1  FROM ")
-	db_sql.WriteString(db.table)
-
-	db_sql.WriteString(db.buildSql())
-	db_sql.WriteString(" LIMIT 1")
-
-	db.trace(db_sql.String(), db.params...)
-
-	db.Err = db.Db.QueryRow(db_sql.String(), db.params...).Scan(&out)
-
-	if db.Err != nil && db.Err.Error() == "sql: no rows in result set" {
-
-		return false, nil
+	if m.builder.table == "" {
+		return false, errors.New("no table defined")
 	}
-	return out > 0, db.Err
+
+	// 构建 WHERE 子句（提取 FROM 后）
+	sqlFull, args := m.builder.Build()
+	afterFrom := strings.SplitN(sqlFull, "FROM "+m.builder.table, 2)
+	whereClause := ""
+	if len(afterFrom) == 2 {
+		whereClause = afterFrom[1]
+	}
+
+	query := fmt.Sprintf("SELECT 1 FROM %s%s LIMIT 1", m.builder.table, whereClause)
+
+	m.trace(query, args)
+
+	var one int
+	err := m.Db.QueryRow(query, args...).Scan(&one)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		m.Err = err
+		return false, err
+	}
+	return true, nil
 
 }
+
 func (db *ConDB) FindById(out, id interface{}) error {
 
 	DB := db
 	if db.parent == nil {
 		DB = db.clone()
 	}
-	if DB.table == "" {
+	if DB.builder.table == "" {
 
-		DB.table = getTable(out)
+		DB.builder.From(getTable(out))
 	}
 
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(DB.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(DB.table)
-	sqlStr.WriteString(" WHERE id=?")
+	DB.builder.Where("id=?", id)
+	query, args := DB.builder.Build()
+	//DB.trace(sqlStr.String(), id)
+	row := DB.Db.QueryRow(query, args...)
 
-	DB.trace(sqlStr.String(), id)
-	rows, err := DB.Db.Query(sqlStr.String(), id)
-	if err != nil {
-
-		return err
-	}
-	defer rows.Close()
-
-	return RowToStruct(rows, out)
+	return RowToStruct(row, out)
 
 }
 func (db *ConDB) Get(out interface{}) error {
@@ -1191,80 +543,27 @@ func (db *ConDB) Get(out interface{}) error {
 	if db.parent == nil {
 		return nil
 	}
-	if db.table == "" {
+	if db.builder.table == "" {
 
-		db.table = getTable(out)
+		db.builder.From(getTable(out))
 	}
 
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-
-	sqlStr.WriteString(db.buildSql())
-
-	if db.group != "" {
-
-		sqlStr.WriteString(db.group)
-	}
-
-	sqlStr.WriteString(" limit 1")
-
-	db.trace(sqlStr.String(), db.params...)
+	query, args := db.builder.Build()
+	query += " LIMIT 1" // ✅ 限制只取一条
 
 	t := reflect.TypeOf(out)
 	kind := t.Elem().Kind()
 
 	if reflect.Struct == kind {
 
-		rows, err := db.Db.Query(sqlStr.String(), db.params...)
-		if err != nil {
+		row := db.Db.QueryRow(query, args...)
 
-			return err
-		}
-		defer rows.Close()
-
-		return RowToStruct(rows, out)
+		return RowToStruct(row, out)
 
 	}
 
-	db.Err = db.Db.QueryRow(sqlStr.String(), db.params...).Scan(out)
+	db.Err = db.Db.QueryRow(query, args...).Scan(out)
 	return db.Err
-
-}
-
-func (db *ConDB) GetForUpdate(out interface{}) error {
-
-	if db.parent == nil {
-		return nil
-	}
-	if db.table == "" {
-
-		db.table = getTable(out)
-	}
-
-	sqlStr := bytes.Buffer{}
-	sqlStr.WriteString("SELECT ")
-	sqlStr.WriteString(db.field)
-	sqlStr.WriteString(" FROM ")
-	sqlStr.WriteString(db.table)
-
-	sqlStr.WriteString(db.buildSql())
-
-	sqlStr.WriteString(" for update")
-
-	db.trace(sqlStr.String())
-
-	rows, err := db.tx.Query(sqlStr.String(), db.params...)
-
-	if err != nil {
-
-		return err
-	}
-	defer rows.Close()
-
-	return RowToStruct(rows, out)
 
 }
 
@@ -1278,10 +577,21 @@ func (m *ConDB) QueryRows(query string, args ...interface{}) (*sql.Rows, error) 
 	return m.Db.Query(query, args...)
 }
 
-func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]interface{}, error) {
+func (db *ConDB) QueryMap(query string, args ...interface{}) (map[string]interface{}, error) {
 
-	m.trace(query, args...)
-	rows, err := m.Db.Query(query, args...)
+	if db.parent == nil {
+		return nil, fmt.Errorf("must be init db")
+	}
+	if db.builder.table == "" {
+
+		return nil, fmt.Errorf("must be init table")
+	}
+	db.builder.Where(query, args...)
+	sqlStr, params := db.builder.Build()
+	sqlStr += " LIMIT 1"
+
+	db.trace(sqlStr, params...)
+	rows, err := db.Db.Query(sqlStr, params...)
 	if err != nil {
 
 		return nil, err
@@ -1290,60 +600,28 @@ func (m *ConDB) QueryMap(query string, args ...interface{}) (map[string]interfac
 	return RowsToMap(rows)
 }
 
-func (m *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]interface{}, error) {
+func (db *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]interface{}, error) {
 
-	m.trace(query, args...)
-	rows, err := m.Db.Query(query, args...)
+	if db.parent == nil {
+		return nil, fmt.Errorf("must be init db")
+	}
+	if db.builder.table == "" {
+
+		return nil, fmt.Errorf("must be init table")
+	}
+
+	db.builder.Where(query, args...)
+	sqlStr, params := db.builder.Build()
+
+	db.trace(sqlStr, params...)
+	rows, err := db.Db.Query(sqlStr, params...)
+
 	if err != nil {
 
 		return nil, err
 	}
 	defer rows.Close()
 	return RowsToMaps(rows)
-}
-
-func (db *ConDB) Pagination(currentPage, pageSize, totalPage int32) (page int32) {
-
-	if pageSize <= 0 {
-		pageSize = 20
-	}
-
-	if currentPage <= 0 {
-
-		currentPage = 1
-	}
-	page = 0
-	if totalPage == 0 || currentPage == 1 {
-
-		total := int32(db.Count())
-		if total <= 0 {
-
-			db.trace("没有查询到记录，获取记录数为0")
-			//panic(`{"code":404, "msg": "没有查询到记录"}`)
-			return
-		}
-
-		page = TotalPage(pageSize, total)
-
-	} else {
-
-		page = totalPage
-	}
-
-	db.Page(currentPage, pageSize)
-	return
-}
-
-func TotalPage(pageSize, total int32) int32 {
-
-	var page int32
-	if total%pageSize == 0 {
-
-		page = total / pageSize
-	} else {
-		page = (total + pageSize) / pageSize
-	}
-	return page
 }
 
 func argsToStr(args ...interface{}) string {
@@ -1371,251 +649,4 @@ func argsToStr(args ...interface{}) string {
 }
 func SliceClear(s *[]interface{}) {
 	*s = (*s)[0:0]
-}
-
-func (db *ConDB) buildSql() string {
-
-	sql := bytes.Buffer{}
-	SliceClear(&db.params)
-	if len(db.Condition) > 0 {
-
-		sql.WriteString(" WHERE ")
-
-		i := 0
-		for _, clause := range db.Condition {
-
-			query := clause["query"].(string)
-			values := clause["args"].([]interface{})
-			if i > 0 {
-				sql.WriteString(" AND ")
-			}
-
-			sql.WriteString(query)
-
-			for _, vv := range values {
-
-				db.params = append(db.params, vv)
-			}
-			i++
-		}
-
-	}
-	if len(db.OrCondition) > 0 {
-
-		sql.WriteString(" OR ")
-
-		i := 0
-
-		for _, clause := range db.OrCondition {
-
-			query := clause["query"].(string)
-			values := clause["args"].([]interface{})
-			if i > 0 {
-				sql.WriteString(" OR ")
-			}
-
-			sql.WriteString(query)
-
-			for _, vv := range values {
-
-				db.params = append(db.params, vv)
-			}
-			i++
-		}
-
-	}
-	if db.inCondition != "" {
-
-		if len(db.Condition) > 0 {
-
-			sql.WriteString(" AND ")
-		} else {
-			sql.WriteString("  ")
-		}
-		sql.WriteString(db.inCondition)
-
-	}
-	return sql.String()
-}
-
-func insertSql(i interface{}) string {
-
-	val := reflect.ValueOf(i)
-	getType := reflect.TypeOf(i)
-
-	_, ins := getType.MethodByName("PreInsert")
-	if ins {
-		mv := val.MethodByName("PreInsert")
-		mv.Call(nil)
-	}
-	data := toMap(val, getType)
-	buff := bytes.NewBuffer([]byte{})
-	value := bytes.NewBuffer([]byte{})
-
-	for k, v := range data {
-
-		if k == "id" {
-
-			id := parseString(v)
-			if id == "" || id == "0" {
-				continue
-			}
-		}
-		buff.WriteString(",")
-		buff.WriteString(k)
-
-		if isNumber(v) {
-
-			value.WriteString(fmt.Sprintf(",%v", v))
-		} else {
-
-			value.WriteString(fmt.Sprintf(",'%v'", v))
-
-		}
-
-	}
-
-	key := strings.TrimLeft(buff.String(), `,`)
-	vas := strings.TrimLeft(value.String(), `,`)
-
-	sql := ` (` + key + `) values (` + vas + `)`
-	return sql
-}
-
-func isNumber(val interface{}) bool {
-	switch val.(type) {
-	case int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		float32, float64:
-		return true
-	default:
-		return false
-	}
-}
-func FormatToDate(input string) string {
-	t, err := time.Parse("2006-01-02", input)
-	if err != nil {
-		return ""
-	}
-	return t.Format("2006-01-02")
-}
-func FormatToDatetime(input string) string {
-	t, err := time.Parse("2006-01-02 15:04:05", input)
-	if err != nil {
-		return ""
-	}
-	return t.Format("2006-01-02 15:04:05")
-}
-func parseString(value interface{}, args ...int) (s string) {
-	switch v := value.(type) {
-	case bool:
-		s = strconv.FormatBool(v)
-	case float32:
-		s = strconv.FormatFloat(float64(v), 'f', -1, 32)
-	case float64:
-		s = strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		s = strconv.FormatInt(int64(v), 10)
-	case int8:
-		s = strconv.FormatInt(int64(v), 10)
-	case int16:
-		s = strconv.FormatInt(int64(v), 10)
-	case int32:
-		s = strconv.FormatInt(int64(v), 10)
-	case int64:
-		s = strconv.FormatInt(v, 10)
-	case uint:
-		s = strconv.FormatUint(uint64(v), 10)
-	case uint8:
-		s = strconv.FormatUint(uint64(v), 10)
-	case uint16:
-		s = strconv.FormatUint(uint64(v), 10)
-	case uint32:
-		s = strconv.FormatUint(uint64(v), 10)
-	case uint64:
-		s = strconv.FormatUint(v, 10)
-	case string:
-		s = v
-	case time.Time:
-		s = v.Format("2006-01-02 15:04:05")
-	case []byte:
-		s = string(v)
-	default:
-		s = fmt.Sprintf("%v", v)
-	}
-	return s
-}
-
-func toMap(v reflect.Value, t reflect.Type) map[string]interface{} {
-
-	m := make(map[string]interface{})
-	vt := t.Elem()
-	vv := v.Elem()
-
-	for i := 0; i < vt.NumField(); i++ {
-
-		obj := vt.Field(i)
-		tag := obj.Tag.Get("db")
-
-		value := vv.Field(i).Interface()
-		if obj.Anonymous { // 输出匿名字段结构
-			if obj.Name == "Common" {
-				continue
-			}
-			for x := 0; x < obj.Type.NumField(); x++ {
-
-				af := obj.Type.Field(x)
-				tag := af.Tag.Get("db")
-				if tag == "" {
-					continue
-				}
-				vl := reflect.ValueOf(value).Field(x).Interface()
-				m[tag] = vl
-
-			}
-		} else {
-
-			if tag == "" {
-				continue
-			}
-			tagType := obj.Tag.Get("type")
-			if tagType == "date" {
-				vv := FormatToDate(fmt.Sprintf("%v", value))
-				if vv == "" {
-					continue
-				}
-				m[tag] = vv
-
-			} else if tagType == "datetime" {
-				vv := FormatToDatetime(fmt.Sprintf("%v", value))
-				if vv == "" {
-					continue
-				}
-				m[tag] = vv
-			} else {
-				m[tag] = value
-			}
-
-		}
-	}
-	return m
-}
-
-func Int(f string) int {
-	v, _ := strconv.ParseInt(f, 10, 0)
-	return int(v)
-}
-func Int32(f string) int32 {
-	v, _ := strconv.ParseInt(f, 10, 64)
-	return int32(v)
-}
-
-func Int64(f string) int64 {
-	v, _ := strconv.ParseInt(f, 10, 64)
-	return int64(v)
-}
-
-func Float64(f string) float64 {
-	v, _ := strconv.ParseFloat(f, 64)
-	return float64(v)
 }
