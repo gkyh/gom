@@ -71,29 +71,45 @@ func (m *ConDB) StructModel(arr interface{}) *ConDB {
 }
 
 // ///////////////////////单行数据映射Struct////////////////////////////
-func RowToStruct(row *sql.Row, out interface{}) error {
-	cols := getFieldMap(reflect.TypeOf(out).Elem())
-	dest := make([]interface{}, len(cols))
-	scan := make([]interface{}, len(cols))
-	for i := range scan {
-		scan[i] = &dest[i]
-	}
-
-	if err := row.Scan(scan...); err != nil {
+func RowToStruct(rows *sql.Rows, out interface{}) error {
+	cols, err := rows.Columns()
+	if err != nil {
 		return err
 	}
 
-	element := reflect.ValueOf(out).Elem()
-	for _, idx := range cols {
-		field := element.FieldByIndex(idx.Index)
-		raw := dest[idx.Index[0]]
+	if !rows.Next() {
+		return sql.ErrNoRows
+	}
 
+	eleType := reflect.TypeOf(out).Elem()
+	fieldMap := getFieldMap(eleType)
+	element := reflect.ValueOf(out).Elem()
+
+	scanVals := make([]interface{}, len(cols))
+	scanDests := make([]interface{}, len(cols))
+	for i := range scanVals {
+		scanDests[i] = &scanVals[i]
+	}
+
+	if err := rows.Scan(scanDests...); err != nil {
+		return err
+	}
+
+	for i, col := range cols {
+		raw := scanVals[i]
 		if raw == nil {
 			continue
 		}
 
+		idx, ok := fieldMap[strings.ToLower(col)]
+		if !ok {
+			continue
+		}
+
+		field := element.FieldByIndex(idx.Index)
 		fieldType := field.Type()
 
+		// 特殊处理时间字段
 		if fieldType == reflect.TypeOf(time.Time{}) {
 			switch v := raw.(type) {
 			case time.Time:
@@ -121,6 +137,7 @@ func RowToStruct(row *sql.Row, out interface{}) error {
 			field.Set(val.Convert(fieldType))
 		}
 	}
+
 	return nil
 }
 

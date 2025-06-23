@@ -18,9 +18,14 @@ func (db *ConDB) GetForUpdate(out interface{}) error {
 
 	db.trace(sqlStr)
 
-	row := db.tx.QueryRow(sqlStr, args...)
+	rows, err := db.tx.Query(sqlStr, args...)
+	if err != nil {
 
-	return RowToStruct(row, out)
+		return err
+	}
+	defer rows.Close()
+
+	return RowToStruct(rows, out)
 
 }
 

@@ -533,9 +533,14 @@ func (db *ConDB) FindById(out, id interface{}) error {
 	DB.builder.Where("id=?", id)
 	query, args := DB.builder.Build()
 	//DB.trace(sqlStr.String(), id)
-	row := DB.Db.QueryRow(query, args...)
+	rows, err := db.Db.Query(query, args...)
+	if err != nil {
 
-	return RowToStruct(row, out)
+		return err
+	}
+	defer rows.Close()
+
+	return RowToStruct(rows, out)
 
 }
 func (db *ConDB) Get(out interface{}) error {
@@ -556,9 +561,14 @@ func (db *ConDB) Get(out interface{}) error {
 
 	if reflect.Struct == kind {
 
-		row := db.Db.QueryRow(query, args...)
+		rows, err := db.Db.Query(query, args...)
+		if err != nil {
 
-		return RowToStruct(row, out)
+			return err
+		}
+		defer rows.Close()
+
+		return RowToStruct(rows, out)
 
 	}
 
@@ -580,12 +590,15 @@ func (m *ConDB) QueryRows(query string, args ...interface{}) (*sql.Rows, error) 
 func (db *ConDB) QueryMap(query string, args ...interface{}) (map[string]interface{}, error) {
 
 	if db.parent == nil {
-		return nil, fmt.Errorf("must be init db")
-	}
-	if db.builder.table == "" {
 
-		return nil, fmt.Errorf("must be init table")
+		rows, err := db.Db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return RowsToMap(rows)
 	}
+
 	db.builder.Where(query, args...)
 	sqlStr, params := db.builder.Build()
 	sqlStr += " LIMIT 1"
@@ -603,11 +616,13 @@ func (db *ConDB) QueryMap(query string, args ...interface{}) (map[string]interfa
 func (db *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]interface{}, error) {
 
 	if db.parent == nil {
-		return nil, fmt.Errorf("must be init db")
-	}
-	if db.builder.table == "" {
 
-		return nil, fmt.Errorf("must be init table")
+		rows, err := db.Db.Query(query, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return RowsToMaps(rows)
 	}
 
 	db.builder.Where(query, args...)
@@ -615,9 +630,7 @@ func (db *ConDB) QueryMaps(query string, args ...interface{}) ([]map[string]inte
 
 	db.trace(sqlStr, params...)
 	rows, err := db.Db.Query(sqlStr, params...)
-
 	if err != nil {
-
 		return nil, err
 	}
 	defer rows.Close()
