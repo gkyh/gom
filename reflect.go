@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -107,35 +108,10 @@ func RowToStruct(rows *sql.Rows, out interface{}) error {
 		}
 
 		field := element.FieldByIndex(idx.Index)
-		fieldType := field.Type()
-
-		// 特殊处理时间字段
-		if fieldType == reflect.TypeOf(time.Time{}) {
-			switch v := raw.(type) {
-			case time.Time:
-				field.Set(reflect.ValueOf(v))
-			case []byte:
-				if t, err := parseTime(string(v)); err == nil {
-					field.Set(reflect.ValueOf(t))
-				}
-			case string:
-				if t, err := parseTime(v); err == nil {
-					field.Set(reflect.ValueOf(t))
-				}
-			}
-			continue
+		if val, ok := ConvertValue(raw, field.Type()); ok {
+			field.Set(val)
 		}
 
-		val := reflect.ValueOf(raw)
-		if val.Kind() == reflect.Ptr && val.IsNil() {
-			continue
-		}
-		if val.Kind() == reflect.Ptr {
-			val = val.Elem()
-		}
-		if val.IsValid() && val.Type().ConvertibleTo(fieldType) {
-			field.Set(val.Convert(fieldType))
-		}
 	}
 
 	return nil
@@ -162,22 +138,9 @@ func RowsToMap(rows *sql.Rows) (map[string]interface{}, error) {
 
 	rowMap := make(map[string]interface{})
 	for i, col := range columns {
-		val := scanVals[i]
-
-		switch v := val.(type) {
-		case nil:
-			rowMap[col] = nil
-		case []byte:
-			s := string(v)
-			if t, err := parseTime(s); err == nil {
-				rowMap[col] = t
-			} else {
-				rowMap[col] = s
-			}
-		default:
-			rowMap[col] = v
-		}
+		rowMap[col] = ConvertValueAuto(scanVals[i])
 	}
+
 	return rowMap, nil
 }
 
@@ -201,21 +164,9 @@ func RowsToMaps(rows *sql.Rows) ([]map[string]interface{}, error) {
 
 		rowMap := make(map[string]interface{})
 		for i, col := range columns {
-			val := scanVals[i]
-			switch v := val.(type) {
-			case nil:
-				rowMap[col] = nil
-			case []byte:
-				s := string(v)
-				if t, err := parseTime(s); err == nil {
-					rowMap[col] = t
-				} else {
-					rowMap[col] = s
-				}
-			default:
-				rowMap[col] = v
-			}
+			rowMap[col] = ConvertValueAuto(scanVals[i])
 		}
+
 		results = append(results, rowMap)
 	}
 
@@ -308,42 +259,120 @@ func RowsToList(rows *sql.Rows, out interface{}) error {
 			}
 
 			field := element.FieldByIndex(idx.Index)
-			fieldType := field.Type()
-
-			// 时间类型特殊处理
-			if fieldType == reflect.TypeOf(time.Time{}) {
-				switch v := raw.(type) {
-				case time.Time:
-					field.Set(reflect.ValueOf(v))
-				case []byte:
-					if t, err := parseTime(string(v)); err == nil {
-						field.Set(reflect.ValueOf(t))
-					}
-				case string:
-					if t, err := parseTime(v); err == nil {
-						field.Set(reflect.ValueOf(t))
-					}
-				}
-				continue
+			if val, ok := ConvertValue(raw, field.Type()); ok {
+				field.Set(val)
 			}
 
-			// 通用处理
-			val := reflect.ValueOf(raw)
-			if val.Kind() == reflect.Ptr && val.IsNil() {
-				continue
-			}
-			if val.Kind() == reflect.Ptr {
-				val = val.Elem()
-			}
-			if val.IsValid() && val.Type().ConvertibleTo(fieldType) {
-				field.Set(val.Convert(fieldType))
-			}
 		}
 
 		sliceValue.Set(reflect.Append(sliceValue, element))
 	}
 
 	return rows.Err()
+}
+func ConvertValue(raw interface{}, targetType reflect.Type) (reflect.Value, bool) {
+	if raw == nil {
+		return reflect.Zero(targetType), false
+	}
+
+	// 处理 time.Time
+	if targetType == reflect.TypeOf(time.Time{}) {
+		switch v := raw.(type) {
+		case time.Time:
+			return reflect.ValueOf(v), true
+		case []byte:
+			if t, err := parseTime(string(v)); err == nil {
+				return reflect.ValueOf(t), true
+			}
+		case string:
+			if t, err := parseTime(v); err == nil {
+				return reflect.ValueOf(t), true
+			}
+		}
+		return reflect.Zero(targetType), false
+	}
+
+	// 处理 float64 (如 DECIMAL)
+	if targetType.Kind() == reflect.Float64 {
+		switch v := raw.(type) {
+		case float64:
+			return reflect.ValueOf(v), true
+		case []byte:
+			if f, err := strconv.ParseFloat(string(v), 64); err == nil {
+				return reflect.ValueOf(f), true
+			}
+		case string:
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				return reflect.ValueOf(f), true
+			}
+		}
+		return reflect.Zero(targetType), false
+	}
+
+	// 处理 int64（如 BIGINT）
+	if targetType.Kind() == reflect.Int64 {
+		switch v := raw.(type) {
+		case int64:
+			return reflect.ValueOf(v), true
+		case []byte:
+			if i, err := strconv.ParseInt(string(v), 10, 64); err == nil {
+				return reflect.ValueOf(i), true
+			}
+		case string:
+			if i, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return reflect.ValueOf(i), true
+			}
+		}
+		return reflect.Zero(targetType), false
+	}
+
+	// 处理 bool（BOOLEAN, TINYINT）
+	if targetType.Kind() == reflect.Bool {
+		switch v := raw.(type) {
+		case bool:
+			return reflect.ValueOf(v), true
+		case int64:
+			return reflect.ValueOf(v != 0), true
+		case []byte:
+			s := string(v)
+			if s == "1" || strings.ToLower(s) == "true" {
+				return reflect.ValueOf(true), true
+			} else if s == "0" || strings.ToLower(s) == "false" {
+				return reflect.ValueOf(false), true
+			}
+		case string:
+			if v == "1" || strings.ToLower(v) == "true" {
+				return reflect.ValueOf(true), true
+			} else if v == "0" || strings.ToLower(v) == "false" {
+				return reflect.ValueOf(false), true
+			}
+		}
+		return reflect.Zero(targetType), false
+	}
+
+	// 处理 string（CHAR, VARCHAR, TEXT）
+	if targetType.Kind() == reflect.String {
+		switch v := raw.(type) {
+		case string:
+			return reflect.ValueOf(v), true
+		case []byte:
+			return reflect.ValueOf(string(v)), true
+		}
+	}
+
+	// 默认处理：如果可以转换
+	val := reflect.ValueOf(raw)
+	if val.Kind() == reflect.Ptr && val.IsNil() {
+		return reflect.Zero(targetType), false
+	}
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.IsValid() && val.Type().ConvertibleTo(targetType) {
+		return val.Convert(targetType), true
+	}
+
+	return reflect.Zero(targetType), false
 }
 
 func parseTime(s string) (time.Time, error) {
@@ -358,4 +387,44 @@ func parseTime(s string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("invalid time format: %s", s)
+}
+
+func ConvertValueAuto(raw interface{}) interface{} {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case []byte:
+		s := string(v)
+
+		// bool
+		if s == "0" || s == "1" {
+			return s == "1"
+		}
+
+		// float64
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+
+		// time.Time
+		if t, err := parseTime(s); err == nil {
+			return t
+		}
+
+		// fallback
+		return s
+
+	case string:
+		// optional: same logic for string
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
+		if t, err := parseTime(v); err == nil {
+			return t
+		}
+		return v
+
+	default:
+		return v
+	}
 }
