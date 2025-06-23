@@ -217,7 +217,7 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 
 		tag := f.Tag.Get("db")
 		if tag == "" {
-			tag = f.Tag.Get("json")
+			tag = f.Tag.Get("gom")
 		}
 		if tag == "" {
 			tag = f.Name
