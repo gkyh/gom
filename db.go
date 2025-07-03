@@ -23,7 +23,7 @@ type SqlExecutor interface {
 	Count(agrs ...interface{}) int64
 	Find(out interface{}) error
 
-	Select(args string) *ConDB
+	Select(out interface{}, sql string, values ...interface{}) error
 	Sort(key, sort string) *ConDB
 	Page(cur, count int32) *ConDB
 
@@ -153,13 +153,19 @@ func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 	}
 }
 
-func (db *ConDB) Select(args string) *ConDB {
+func (db *ConDB) Select(out interface{}, sql string, values ...interface{}) error {
 
-	if db.parent == nil {
-		return nil
+	if sql == "" {
+		return fmt.Errorf("sql is empty")
 	}
-	db.builder.Select(args)
-	return db
+	rows, err := db.Db.Query(sql, values...)
+	if err != nil {
+
+		return err
+	}
+	defer rows.Close()
+
+	return RowsToList(rows, out)
 }
 
 func (m *ConDB) Field(field string) *ConDB {
