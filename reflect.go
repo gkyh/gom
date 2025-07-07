@@ -108,7 +108,7 @@ func RowToStruct(rows *sql.Rows, out interface{}) error {
 		}
 
 		field := element.FieldByIndex(idx.Index)
-		if val, ok := ConvertValue(raw, field.Type()); ok {
+		if val, ok := ConvertValue(raw, field.Type(), idx.Tag); ok {
 			field.Set(val)
 		}
 
@@ -182,6 +182,7 @@ var fieldCache sync.Map // map[reflect.Type]map[string]int
 type fieldIndex struct {
 	Index []int // 适配嵌套字段
 	Type  reflect.Type
+	Tag   reflect.StructTag
 }
 
 func getFieldMap(t reflect.Type) map[string]fieldIndex {
@@ -222,7 +223,7 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 		if tag == "" {
 			tag = f.Name
 		}
-		out[strings.ToLower(tag)] = fieldIndex{Index: idx, Type: f.Type}
+		out[strings.ToLower(tag)] = fieldIndex{Index: idx, Type: f.Type, Tag: f.Tag}
 	}
 }
 func RowsToList(rows *sql.Rows, out interface{}) error {
@@ -259,7 +260,7 @@ func RowsToList(rows *sql.Rows, out interface{}) error {
 			}
 
 			field := element.FieldByIndex(idx.Index)
-			if val, ok := ConvertValue(raw, field.Type()); ok {
+			if val, ok := ConvertValue(raw, field.Type(), idx.Tag); ok {
 				field.Set(val)
 			}
 
@@ -270,7 +271,7 @@ func RowsToList(rows *sql.Rows, out interface{}) error {
 
 	return rows.Err()
 }
-func ConvertValue(raw interface{}, targetType reflect.Type) (reflect.Value, bool) {
+func ConvertValue(raw interface{}, targetType reflect.Type, tag reflect.StructTag) (reflect.Value, bool) {
 	if raw == nil {
 		return reflect.Zero(targetType), false
 	}
@@ -293,6 +294,14 @@ func ConvertValue(raw interface{}, targetType reflect.Type) (reflect.Value, bool
 	}
 
 	// 处理 float64 (如 DECIMAL)
+	if tag.Get("type") == "decimal" {
+		switch v := raw.(type) {
+		case []byte:
+			return reflect.ValueOf(string(v)), true
+		case string:
+			return reflect.ValueOf(v), true
+		}
+	}
 	if targetType.Kind() == reflect.Float64 {
 		switch v := raw.(type) {
 		case float64:
