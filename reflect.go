@@ -3,6 +3,7 @@ package gom
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -321,6 +322,10 @@ func ConvertValue(raw interface{}, targetType reflect.Type, tag reflect.StructTa
 	// 处理 int64（如 BIGINT）
 	if targetType.Kind() == reflect.Int64 {
 		switch v := raw.(type) {
+		case uint64:
+			if v <= math.MaxInt64 {
+				return reflect.ValueOf(int64(v)), true
+			}
 		case int64:
 			return reflect.ValueOf(v), true
 		case []byte:
