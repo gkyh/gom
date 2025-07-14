@@ -291,32 +291,39 @@ func (m *ConDB) Delete(i ...interface{}) error {
 
 	obj := i[0]
 	rv := reflect.ValueOf(obj).Elem()
-	typ := rv.Type()
-	found := false
-	var idValue interface{}
-	var dbField string
-
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
-		tag := field.Tag.Get("db")
-		if tag == "" {
-			tag = field.Tag.Get("gom")
-		}
-		if strings.ToLower(tag) == "id" {
-			idValue = rv.Field(i).Interface()
-			dbField = tag
-			found = true
-			break
-		}
-	}
-	if !found {
-		m.trace("No field with tag db:\"id\" found")
-		return errors.New("missing id field with db tag")
+	idValue, fieldName, ok := findIDField(rv)
+	if !ok {
+		return errors.New(`missing field tag db:"id"`)
 	}
 
-	return m.Model(obj).Where(fmt.Sprintf("%s = ?", dbField), idValue).delete()
+	return m.Model(obj).Where(fmt.Sprintf("%s = ?", fieldName), idValue).delete()
 
 }
+
+func findIDField(v reflect.Value) (value interface{}, dbField string, found bool) {
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("db")
+		if tag == "" {
+			tag = f.Tag.Get("gom")
+		}
+		tag = strings.ToLower(tag)
+
+		if tag == "id" { // 命中主键
+			return v.Field(i).Interface(), tag, true
+		}
+
+		// 若是匿名嵌套 struct，递归查找
+		if f.Anonymous && f.Type.Kind() == reflect.Struct {
+			if val, fld, ok := findIDField(v.Field(i)); ok {
+				return val, fld, true
+			}
+		}
+	}
+	return nil, "", false
+}
+
 
 func (m *ConDB) delete() error {
 	if m.parent == nil {
@@ -329,16 +336,23 @@ func (m *ConDB) delete() error {
 	}
 
 	query, args := m.builder.Build()
-	query = strings.Replace(query, m.builder.fields, "", 1) // 去掉 SELECT 字段部分，保留 FROM + WHERE
-	query = strings.Replace(query, "SELECT", "DELETE", 1)
+	// 从 WHERE 开始提取
+	whereIndex := strings.Index(strings.ToUpper(query), "WHERE")
+	if whereIndex == -1 {
+		m.trace("DELETE missing WHERE clause")
+		return errors.New("unsafe delete: missing WHERE clause")
+	}
 
-	m.trace(query, args)
+	whereClause := query[whereIndex:] // 保留 WHERE 到最后
+	deleteSQL := fmt.Sprintf("DELETE FROM %s %s", m.builder.table, whereClause)
+
+	m.trace(deleteSQL, args)
 
 	var err error
 	if m.tx == nil {
-		m.Result, err = m.Db.Exec(query, args...)
+		m.Result, err = m.Db.Exec(deleteSQL, args...)
 	} else {
-		m.Result, err = m.tx.Exec(query, args...)
+		m.Result, err = m.tx.Exec(deleteSQL, args...)
 	}
 
 	if err != nil {
