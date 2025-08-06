@@ -26,13 +26,12 @@ func NewSQLBuilder() *SQLBuilder {
 		args:  []interface{}{},
 	}
 }
-/*
+
 func (b *SQLBuilder) Select(fields string) *SQLBuilder {
-	b.op = "SELECT"
+	
 	b.fields = fields
 	return b
 }
-*/
 
 func (b *SQLBuilder) From(table string) *SQLBuilder {
 	b.table = table
