@@ -468,6 +468,7 @@ func (db *ConDB) List() ([]map[string]interface{}, error) {
 func (db *ConDB) SelectInt(field string) int64 {
 
 	var out int64
+	db.builder.Select(field)
 	db_sql, params := db.builder.Build()
 
 	db_sql += " limit 1"
@@ -480,6 +481,7 @@ func (db *ConDB) SelectInt(field string) int64 {
 func (db *ConDB) SelectStr(field string) string {
 
 	var out string
+	db.builder.Select(field)
 	db_sql, params := db.builder.Build()
 
 	db_sql += " limit 1"
