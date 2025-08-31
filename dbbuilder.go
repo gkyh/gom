@@ -6,25 +6,26 @@ import (
 	"strings"
 )
 
+type clause struct {
+	kind string // "where", "or", "in"
+	expr string
+	args []interface{}
+}
 type SQLBuilder struct {
-	//op      string
 	fields  string
 	table   string
-	where   []string
-	or      []string
-	in      string
+	//where   []string
+	//or      []string
+	//in      string
+	clauses []clause
 	groupBy string
 	orderBy string
 	limit   string
-	args    []interface{}
+	//args    []interface{}
 }
 
 func NewSQLBuilder() *SQLBuilder {
-	return &SQLBuilder{
-		where: []string{},
-		or:    []string{},
-		args:  []interface{}{},
-	}
+	return &SQLBuilder{}
 }
 
 func (b *SQLBuilder) Select(fields string) *SQLBuilder {
@@ -39,22 +40,22 @@ func (b *SQLBuilder) From(table string) *SQLBuilder {
 }
 
 func (b *SQLBuilder) Where(clause string, args ...interface{}) *SQLBuilder {
-	b.where = append(b.where, clause)
-	b.args = append(b.args, args...)
+	b.clauses = append(b.clauses, clause{"where", expr, args})
 	return b
 }
 
 func (b *SQLBuilder) Or(clause string, args ...interface{}) *SQLBuilder {
-	b.or = append(b.or, clause)
-	b.args = append(b.args, args...)
+	b.clauses = append(b.clauses, clause{"or", expr, args})
 	return b
 }
 
 func (b *SQLBuilder) In(field string, values []interface{}) *SQLBuilder {
-	placeholders := strings.Repeat("?,", len(values))
-	placeholders = placeholders[:len(placeholders)-1]
-	b.in = fmt.Sprintf("%s IN (%s)", field, placeholders)
-	b.args = append(b.args, values...)
+	if len(values) == 0 {
+		return b
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(values)), ",")
+	expr := fmt.Sprintf("%s IN (%s)", field, placeholders)
+	b.clauses = append(b.clauses, clause{"in", expr, values})
 	return b
 }
 
@@ -74,49 +75,61 @@ func (b *SQLBuilder) Limit(offset, count int32) *SQLBuilder {
 }
 
 func (b *SQLBuilder) Build() (string, []interface{}) {
-	var sql bytes.Buffer
+	var buf strings.Builder
+	args := []interface{}{}
 
-	sql.WriteString("SELECT ")
+	buf.WriteString("SELECT ")
 	if b.fields == "" {
-		sql.WriteString("*")
+		buf.WriteString("*")
 	} else {
-		sql.WriteString(b.fields)
+		buf.WriteString(b.fields)
 	}
-	sql.WriteString(" FROM ")
-	sql.WriteString(b.table)
+	buf.WriteString(" FROM ")
+	buf.WriteString(b.table)
 
-	if len(b.where) > 0 {
-		sql.WriteString(" WHERE ")
-		sql.WriteString(strings.Join(b.where, " AND "))
-	}
-	if len(b.or) > 0 {
-		if len(b.where) == 0 {
-			sql.WriteString(" WHERE ")
-		} else {
-			sql.WriteString(" OR ")
+	first := true
+	for _, c := range b.clauses {
+		switch c.kind {
+		case "where":
+			if first {
+				buf.WriteString(" WHERE ")
+				first = false
+			} else {
+				buf.WriteString(" AND ")
+			}
+			buf.WriteString(c.expr)
+		case "or":
+			if first {
+				buf.WriteString(" WHERE ")
+				first = false
+			} else {
+				buf.WriteString(" OR ")
+			}
+			buf.WriteString(c.expr)
+		case "in":
+			if first {
+				buf.WriteString(" WHERE ")
+				first = false
+			} else {
+				buf.WriteString(" AND ")
+			}
+			buf.WriteString(c.expr)
 		}
-		sql.WriteString(strings.Join(b.or, " OR "))
+		args = append(args, c.args...)
 	}
-	if b.in != "" {
-		if len(b.where) == 0 && len(b.or) == 0 {
-			sql.WriteString(" WHERE ")
-		} else {
-			sql.WriteString(" AND ")
-		}
-		sql.WriteString(b.in)
-	}
+
 	if b.groupBy != "" {
-		sql.WriteString(" GROUP BY ")
-		sql.WriteString(b.groupBy)
+		buf.WriteString(" GROUP BY ")
+		buf.WriteString(b.groupBy)
 	}
 	if b.orderBy != "" {
-		sql.WriteString(" ORDER BY ")
-		sql.WriteString(b.orderBy)
+		buf.WriteString(" ORDER BY ")
+		buf.WriteString(b.orderBy)
 	}
 	if b.limit != "" {
-		sql.WriteString(" ")
-		sql.WriteString(b.limit)
+		buf.WriteString(" ")
+		buf.WriteString(b.limit)
 	}
 
-	return sql.String(), b.args
+	return buf.String(), args
 }
