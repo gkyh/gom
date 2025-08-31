@@ -1,7 +1,6 @@
 package gom
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 )
@@ -14,14 +13,10 @@ type clause struct {
 type SQLBuilder struct {
 	fields  string
 	table   string
-	//where   []string
-	//or      []string
-	//in      string
 	clauses []clause
 	groupBy string
 	orderBy string
 	limit   string
-	//args    []interface{}
 }
 
 func NewSQLBuilder() *SQLBuilder {
@@ -39,12 +34,12 @@ func (b *SQLBuilder) From(table string) *SQLBuilder {
 	return b
 }
 
-func (b *SQLBuilder) Where(clause string, args ...interface{}) *SQLBuilder {
+func (b *SQLBuilder) Where(expr string, args ...interface{}) *SQLBuilder {
 	b.clauses = append(b.clauses, clause{"where", expr, args})
 	return b
 }
 
-func (b *SQLBuilder) Or(clause string, args ...interface{}) *SQLBuilder {
+func (b *SQLBuilder) Or(expr string, args ...interface{}) *SQLBuilder {
 	b.clauses = append(b.clauses, clause{"or", expr, args})
 	return b
 }
