@@ -141,6 +141,11 @@ func buildInsertParts(i interface{}) ([]string, []string, []interface{}) {
 				continue
 			}
 			value = valStr
+		} else if typeHint == "decimal" {
+
+			if valStr == "" {
+				value = "0.00"
+			}		
 		}
 
 		fields = append(fields, tag)
