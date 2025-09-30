@@ -203,13 +203,13 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 		if !f.IsExported() {
 			continue
 		}
-		idx := append([]int{}, parent...)
-		idx = append(idx, i)
 
-		// 忽略 Common[T] 这种泛型匿名字段
-		if f.Anonymous && strings.HasPrefix(f.Type.String(), "Common[") {
+		if f.Tag.Get("ignore") == "true" {
 			continue
 		}
+		
+		idx := append([]int{}, parent...)
+		idx = append(idx, i)
 
 		if f.Anonymous {
 			ft := f.Type
@@ -217,6 +217,7 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {
+				fmt.Println(ft.String())
 				collectFields(ft, idx, out)
 				continue
 			}
