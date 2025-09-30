@@ -11,6 +11,30 @@ import (
 	"time"
 )
 
+// 驼峰转蛇形命名
+func CamelToSnake(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	// 预分配足够的容量
+	result := make([]byte, 0, len(s)*2)
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		if c >= 'A' && c <= 'Z' {
+			if i > 0 {
+				result = append(result, '_')
+			}
+			result = append(result, c+32) // 转小写
+		} else {
+			result = append(result, c)
+		}
+	}
+
+	return string(result)
+}
 func getTable(class interface{}) string {
 
 	var table string
@@ -22,6 +46,7 @@ func getTable(class interface{}) string {
 
 		idx++
 		ss := string([]rune(se)[idx:len(se)])
+		ss = CamelToSnake(ss)
 		table = strings.ToLower(ss)
 	} else {
 		table = se
