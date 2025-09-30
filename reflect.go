@@ -217,7 +217,6 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {
-				fmt.Println(ft.String())
 				collectFields(ft, idx, out)
 				continue
 			}
