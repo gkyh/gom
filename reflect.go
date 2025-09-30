@@ -206,6 +206,11 @@ func collectFields(t reflect.Type, parent []int, out map[string]fieldIndex) {
 		idx := append([]int{}, parent...)
 		idx = append(idx, i)
 
+		// 忽略 Common[T] 这种泛型匿名字段
+		if f.Anonymous && strings.HasPrefix(f.Type.String(), "Common[") {
+			continue
+		}
+
 		if f.Anonymous {
 			ft := f.Type
 			if ft.Kind() == reflect.Pointer {
