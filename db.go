@@ -188,8 +188,8 @@ func (m *ConDB) Scan(out interface{}) error {
 		return RowsToList(rows, out)
 	case reflect.Struct:
 		return RowToStruct(rows, out)
-	case reflect.Map:
-		return RowsToMap(rows)
+	//case reflect.Map:
+	//	return RowsToMap(rows)
 	default:
 		return errors.New("unsupported out type, must be slice or struct")
 	}
