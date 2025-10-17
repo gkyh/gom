@@ -23,7 +23,9 @@ type SqlExecutor interface {
 	Count(agrs ...interface{}) int64
 	Find(out interface{}) error
 
-	Select(out interface{}, sql string, values ...interface{}) error
+	//Select(out interface{}, sql string, values ...interface{}) error
+	Raw(query string, args ...interface{}) *ConDB
+	Scan(out interface{}) error 
 	Sort(key, sort string) *ConDB
 	Page(cur, count int32) *ConDB
 
@@ -68,6 +70,9 @@ type ConDB struct {
 	Err     error
 	Result  sql.Result
 	builder *SQLBuilder
+
+	rawSQL   string        //存放 Raw SQL
+	rawArgs  []interface{} //存放参数
 }
 
 var logger SqlLogger
@@ -150,6 +155,43 @@ func (m *ConDB) Where(query string, values ...interface{}) *ConDB {
 
 		m.builder.Where(query, values...)
 		return m
+	}
+}
+
+// Raw 执行原生 SQL
+func (m *ConDB) Raw(query string, args ...interface{}) *ConDB {
+	newDB := m.clone()
+	newDB.rawSQL = query
+	newDB.rawArgs = args
+	return newDB
+}
+
+// Scan 根据 out 类型执行不同的映射逻辑
+func (m *ConDB) Scan(out interface{}) error {
+	if m.rawSQL == "" {
+		return errors.New("no raw SQL provided, use Raw() first")
+	}
+
+	rows, err := m.Db.Query(m.rawSQL, m.rawArgs...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	rv := reflect.ValueOf(out)
+	if rv.Kind() != reflect.Ptr {
+		return errors.New("out must be a pointer")
+	}
+
+	switch rv.Elem().Kind() {
+	case reflect.Slice:
+		return RowsToList(rows, out)
+	case reflect.Struct:
+		return RowToStruct(rows, out)
+	case reflect.Map:
+		return RowsToMap(rows)
+	default:
+		return errors.New("unsupported out type, must be slice or struct")
 	}
 }
 
