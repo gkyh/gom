@@ -204,6 +204,13 @@ func (m *ConDB) Scan(out interface{}) error {
 		// 使用 ConvertValueAuto 自动推断类型
 		converted := ConvertValueAuto(raw)
 		val := reflect.ValueOf(converted)
+
+		if !val.IsValid() {
+	        // 说明数据库返回了 NULL 值
+	        // 可以选择设为零值或返回错误
+	        elem.Set(reflect.Zero(elem.Type()))
+	        return nil
+	    }
 		if val.Type().ConvertibleTo(elem.Type()) {
 			elem.Set(val.Convert(elem.Type()))
 		} else {
