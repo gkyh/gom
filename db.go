@@ -190,6 +190,21 @@ func (m *ConDB) Scan(out interface{}) error {
 		return RowToStruct(rows, out)
 	//case reflect.Map:
 	//	return RowsToMap(rows)
+	// 基础类型：单值查询（sum、count、avg 等）
+	case reflect.Int, reflect.Int64, reflect.Float32, reflect.Float64, reflect.String, reflect.Bool:
+		if !rows.Next() {
+			return sql.ErrNoRows
+		}
+		var raw interface{}
+		if err := rows.Scan(&raw); err != nil {
+			return err
+		}
+		val, ok := ConvertValue(raw, elem.Type())
+		if ok {
+			elem.Set(val)
+		}
+		return nil
+
 	default:
 		return errors.New("unsupported out type, must be slice or struct")
 	}
