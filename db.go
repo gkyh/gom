@@ -183,7 +183,9 @@ func (m *ConDB) Scan(out interface{}) error {
 		return errors.New("out must be a pointer")
 	}
 
-	switch rv.Elem().Kind() {
+	elem := rv.Elem() 
+
+	switch elem.Kind() {
 	case reflect.Slice:
 		return RowsToList(rows, out)
 	case reflect.Struct:
@@ -201,8 +203,6 @@ func (m *ConDB) Scan(out interface{}) error {
 		}
 		// 使用 ConvertValueAuto 自动推断类型
 		converted := ConvertValueAuto(raw)
-	
-		// 尝试将自动识别的结果写入目标类型
 		val := reflect.ValueOf(converted)
 		if val.Type().ConvertibleTo(elem.Type()) {
 			elem.Set(val.Convert(elem.Type()))
