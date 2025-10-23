@@ -199,9 +199,16 @@ func (m *ConDB) Scan(out interface{}) error {
 		if err := rows.Scan(&raw); err != nil {
 			return err
 		}
-		val, ok := ConvertValue(raw, elem.Type())
-		if ok {
-			elem.Set(val)
+		// 使用 ConvertValueAuto 自动推断类型
+		converted := ConvertValueAuto(raw)
+	
+		// 尝试将自动识别的结果写入目标类型
+		val := reflect.ValueOf(converted)
+		if val.Type().ConvertibleTo(elem.Type()) {
+			elem.Set(val.Convert(elem.Type()))
+		} else {
+			// 无法直接转换时（例如 interface{} 类型）
+			elem.Set(reflect.ValueOf(converted))
 		}
 		return nil
 
