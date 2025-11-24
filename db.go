@@ -100,7 +100,7 @@ func (m *ConDB) TraceOff() {
 func (m *ConDB) trace(query string, args ...interface{}) {
 	if logger != nil {
 		var margs = argsToStr(args...)
-		logger.InfoSkip(1,"%s%s [%s]", logPrefix, query, margs)
+		logger.Printf("%s%s [%s]", logPrefix, query, margs)
 	}
 }
 
