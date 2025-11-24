@@ -163,6 +163,8 @@ func (m *ConDB) Raw(query string, args ...interface{}) *ConDB {
 	newDB := m.clone()
 	newDB.rawSQL = query
 	newDB.rawArgs = args
+
+	m.trace(query, args...)
 	return newDB
 }
 
